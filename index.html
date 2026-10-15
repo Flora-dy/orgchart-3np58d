@@ -913,6 +913,14 @@ function aggregate(people){
         FIX.push(`${m.姓名}：兼管「${c}」，已标为该层的暂管负责人（本岗和编制不变）`);
       }
     }));
+    // 兜底：兼管列明确写了中心名时，即使组织列经过筛选/合并，也直接绑定到该中心。
+    // 这样“供应中心、规建中心”不会因为路径推断差异而留下空白。
+    const allManagers=[...new Set([...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)])];
+    cenNames.forEach(c=>{
+      if(cenHeads[c]?.length || window._cenExt[c]) return;
+      const hit=allManagers.find(m=>interimTargets(m).includes(c));
+      if(hit) window._cenExt[c]=hit;
+    });
   }
   // 「兼管分组」填的是部门横条那一层的名字：在该部门负责人的位置标「现由 ×× 兼管」，
   // 本岗和编制都不变。表里有同名分组时仍按分组兼任处理，旧表画出来不变
