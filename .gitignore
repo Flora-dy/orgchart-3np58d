@@ -1,0 +1,11 @@
+# 绝不上传的：真实人员数据与生成结果
+*.xlsx
+!人员信息填写模板.xlsx
+!公司架构填写模板.xlsx
+*.docx
+*.pptx
+*.pdf
+输出/
+示例输出/
+__pycache__/
+.DS_Store

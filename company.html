@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公司架构图生成器</title>
+<style>
+  body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f0f2f5;color:#222}
+  header{background:#1f4e79;color:#fff;padding:14px 24px}
+  header h1{margin:0;font-size:18px}
+  header p{margin:4px 0 0;font-size:12px;opacity:.85}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  header a.switch{color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:5px;padding:6px 14px;font-size:13px;text-decoration:none;white-space:nowrap}
+  header a.switch:hover{background:rgba(255,255,255,.15)}
+  .wrap{max-width:1560px;margin:0 auto;padding:16px 24px}
+  .panel{background:#fff;border-radius:8px;padding:16px 20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .panel h2{font-size:14px;margin:0 0 10px;color:#1f4e79}
+  textarea{width:100%;height:150px;box-sizing:border-box;font:12px/1.5 Menlo,Consolas,monospace;border:1px solid #ccc;border-radius:4px;padding:8px;white-space:pre}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .row label{font-size:13px}
+  input[type=text]{border:1px solid #ccc;border-radius:4px;padding:5px 8px;font-size:13px}
+  button,a.btn{background:#1f4e79;color:#fff;border:0;border-radius:5px;padding:8px 18px;font-size:14px;cursor:pointer;text-decoration:none;display:inline-block}
+  button:hover,a.btn:hover{background:#2a659c}
+  button.sec,a.sec{background:#e8eef5;color:#1f4e79}
+  button:disabled{opacity:.45;cursor:default}
+  #msg{font-size:13px;line-height:1.7}
+  #msg .err{color:#b42318;background:#fef3f2;border-left:4px solid #b42318;padding:8px 12px;border-radius:4px}
+  #msg .warn{color:#8a5a00;background:#fff8e6;border-left:4px solid #d69e2e;padding:8px 12px;border-radius:4px}
+  #msg .ok{color:#256029}
+  #chartbox{background:#fff;border-radius:8px;padding:10px;overflow:auto;box-shadow:0 1px 3px rgba(0,0,0,.08);min-height:120px}
+  #chartbox svg{display:block;max-width:100%;height:auto}
+  details{font-size:13px;line-height:1.8;color:#444}
+  details summary{cursor:pointer;color:#1f4e79}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:3px}
+  @media (max-width:600px){.wrap{padding:12px 16px}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>公司架构图生成器</h1>
+    <p>只画组织框架，不放人员；数据只在本机浏览器里处理，不上传</p>
+  </div>
+  <a class="switch" href="index.html" data-local="组织架构生成器-免安装浏览器版.html" title="带人员信息的组织架构图">← 人员组织架构图</a>
+</header>
+<div class="wrap">
+
+<div class="panel">
+  <h2>① 粘贴架构表</h2>
+  <details>
+    <summary>怎么填（点开看）</summary>
+    <p>用《公司架构填写模板.xlsx》，或直接用《人员信息填写模板》——只认下面这些列，别的列会被忽略：</p>
+    <ul>
+      <li><b>组织1</b>：全表同一个值（公司名），图上不单独画</li>
+      <li><b>组织2</b> 留空 = 公司高层（董事长、总经理…），按显示顺序自上而下串成一列</li>
+      <li><b>组织2</b> = 分管板块，每个取值画成一列；想在框里带上分管人，就写成 <code>副总经理（营销 李四）</code></li>
+      <li><b>组织3</b> = 板块下的中心或直属部门；<b>组织4</b> = 中心下的部门（最底下一排竖排的框）</li>
+      <li>只填到组织2 的行（如执行院长）画在该板块框的下方</li>
+      <li><b>架构角色</b> 填 <code>Side</code>：画成挂在竖线旁边的侧框（董秘办、总经办、营销办…）；旧写法 <code>幕僚</code>、<code>侧挂</code> 也认</li>
+      <li><b>姓名</b> 填真名才显示；留空、单个字母（A/B/C）或岗位里带「占位」的行只当组织占位</li>
+      <li><b>显示岗位</b>：框里显示的文字，留空用岗位；<b>不上图</b> 填「是」的行不画；<b>显示顺序</b> 越小越靠前</li>
+    </ul>
+  </details>
+  <textarea id="data" placeholder="在 Excel 里选中「人员名单」整页（含表头行）复制，粘贴到这里…"></textarea>
+  <div class="row">
+    <button class="sec" onclick="loadDemo()">填入示例数据试试</button>
+    <button class="sec" onclick="clearAll()">清空</button>
+    <a class="btn sec" href="公司架构填写模板.xlsx" download>下载填写模板</a>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>② 生成与导出</h2>
+  <div class="row">
+    <label>图标题 <input type="text" id="title" size="34" placeholder="留空 = 公司名＋组织架构图"></label>
+    <label><input type="checkbox" id="showNames" checked onchange="CUR&&run()"> 显示姓名（填了真名的才显示）</label>
+    <label>配色 <select id="style" onchange="CUR&&run()">
+      <option value="color" selected>组织架构图色调</option>
+      <option value="gray">灰色简洁</option>
+    </select></label>
+    <label><input type="checkbox" id="moduleTint" checked onchange="CUR&&run()"> 各板块用不同颜色</label>
+  </div>
+  <div class="row">
+    <button onclick="run()">生成架构图</button>
+    <button class="sec" id="bSvg" onclick="downloadSvg()" disabled>下载 SVG</button>
+    <button class="sec" id="bPng" onclick="downloadPng()" disabled>下载高清 PNG</button>
+    <button class="sec" id="bPdf" onclick="printPdf()" disabled>打印 / 另存 PDF</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<div id="chartbox"></div>
+</div>
+
+<script>
+/* ══════════════════════════ 读表 ══════════════════════════ */
+// Excel 复制出来是制表符分隔；单元格里有换行/引号时会被双引号包起来
+// 单元格以 " 开头时，只有后面真有一个「收尾引号 + 制表符/换行/结尾」才当作 Excel 加的引号；
+// 否则（如 "ABC"公司、只有半边引号）按普通字符原样保留，不会把后面的格子吞掉
+function quotedAhead(txt,i){
+  for(let j=i+1;j<txt.length;j++){
+    if(txt[j]!=='"') continue;
+    if(txt[j+1]==='"'){ j++; continue; }
+    const nx=txt[j+1];
+    return nx===undefined||nx==="\t"||nx==="\n";
+  }
+  return false;
+}
+function parseTSV(txt){
+  const rows=[]; let row=[], cell="", q=false;
+  txt=txt.replace(/\r\n?/g,"\n");
+  for(let i=0;i<txt.length;i++){
+    const ch=txt[i];
+    if(q){
+      if(ch==='"'){ if(txt[i+1]==='"'){cell+='"';i++;} else q=false; }
+      else cell+=ch;
+    }else if(ch==='"' && cell==="" && quotedAhead(txt,i)){ q=true; }
+    else if(ch==="\t"){ row.push(cell); cell=""; }
+    else if(ch==="\n"){ row.push(cell); rows.push(row); row=[]; cell=""; }
+    else cell+=ch;
+  }
+  if(cell!==""||row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+
+const chars=s=>[...s];
+function readRows(txt){
+  const rows=parseTSV(txt).map((r,i)=>Object.assign(r,{_n:i+1})).filter(r=>r.some(v=>String(v).trim()));
+  if(!rows.length) throw "还没有粘贴数据";
+  const hdr=rows[0].map(s=>String(s).trim()), ix={};
+  hdr.forEach((h,i)=>{ if(h && !(h in ix)) ix[h]=i; });
+  for(const need of ["组织1","组织2"])
+    if(!(need in ix)) throw `表头里没有「${need}」列——请连表头行一起复制，并使用填写模板的列名`;
+  const g=(r,h)=>(ix[h]!=null && r[ix[h]]!=null)?String(r[ix[h]]).trim():"";
+  const out=[];
+  rows.slice(1).forEach(r=>{
+    const n=r._n;
+    let org=[1,2,3,4,5].map(i=>g(r,"组织"+i));
+    if(!org.some(Boolean)) return;
+    if(["是","1","Y","y","√"].includes(g(r,"不上图"))) return;
+    org=org.slice(0,org.map(Boolean).lastIndexOf(true)+1);
+    if(org.includes("")) throw `第 ${n} 行组织列中间有空格子：${org.join("/")}；请从组织1 开始连续往右填`;
+    const ov=g(r,"显示顺序"), o=ov===""?NaN:Number(ov);
+    out.push({row:n,org,name:g(r,"姓名"),role:g(r,"岗位"),show:g(r,"显示岗位"),
+              arch:g(r,"架构角色"),order:isNaN(o)?Infinity:o});
+  });
+  if(!out.length) throw "表里没有可画的行";
+  out.sort((a,b)=>(a.order-b.order)||(a.row-b.row));      // 显示顺序优先，没填的按原行序排在后面
+  return out;
+}
+
+/* ══════════════════════════ 组织结构 ══════════════════════════ */
+function buildModel(ROWS,showNames){
+  const roots=[...new Set(ROWS.map(p=>p.org[0]))];
+  if(roots.length>1) throw `组织1 有多个取值（${roots.join("、")}），公司架构图只支持一家公司`;
+  const ROOT=roots[0];
+  // 侧框（幕僚位）的写法与人员架构图生成器一致；Side 给不读中文的同事用，不分大小写
+  const isStaff=p=>/幕僚|侧挂|参谋|直属|\bside\b/i.test(p.arch);
+  const realName=p=>{
+    const n=p.name;
+    if(!showNames || !n || /^[A-Za-z]$/.test(n) || p.role.includes("占位")) return "";
+    return n;
+  };
+  const label=p=>{
+    const base=p.show||p.role, nm=realName(p);
+    return nm && !base.includes(nm) ? `${base}　${nm}` : base;
+  };
+  // 板块下的单元只要有一行标了 Side（幕僚），整个单元都画成侧框（不再同时出现在末级那一排）
+  const STAFF_UNITS=new Set(ROWS.filter(p=>p.org.length===3&&isStaff(p)).map(p=>p.org[1]+"\u0001"+p.org[2]));
+  const TOP=[], COLS=new Map(), WARN=[];
+  for(const p of ROWS){
+    const path=p.org.slice(1);
+    if(!path.length){                                   // 公司高层
+      if(isStaff(p)){
+        if(!TOP.length) TOP.push({label:ROOT,side:[]});
+        TOP[TOP.length-1].side.push(label(p));
+      }else if(label(p)) TOP.push({label:label(p),side:[]});   // 只写了公司名的空行不画框
+      continue;
+    }
+    if(!COLS.has(path[0])) COLS.set(path[0],{execs:[],sides:[],units:new Map()});
+    const c=COLS.get(path[0]);
+    if(path.length===1){                                // 执行院长 / 板块幕僚；只占位建板块的空行不画框
+      const lb=label(p);
+      if(lb) (isStaff(p)?c.sides:c.execs).push(lb);
+    }
+    else if(STAFF_UNITS.has(path[0]+"\u0001"+path[1])) c.sides.push(path[1]);   // 营销办这类
+    else{
+      if(!c.units.has(path[1])) c.units.set(path[1],[]);
+      const lv=c.units.get(path[1]);
+      if(path.length>=3 && !lv.includes(path[2])) lv.push(path[2]);
+      if(path.length>3) WARN.push(`第 ${p.row} 行组织层级超过 4 层（${p.org.join("/")}），只画到「${path[2]}」`);
+    }
+  }
+  for(const c of COLS.values()){ c.sides=[...new Set(c.sides)]; c.execs=[...new Set(c.execs)]; }
+  if(!showNames){                                     // 板块名里「（营销 李四）」这种写法的分管人也隐藏
+    const strip=s=>s.replace(/（([^（）\s]+)\s+[^（）]+）$/,"（$1）").replace(/\(([^()\s]+)\s+[^()]+\)$/,"($1)");
+    for(const [k,c] of [...COLS]){ COLS.delete(k); c.label=strip(k); COLS.set(k,c); }
+  }
+  return {ROOT,TOP,COLS,WARN};
+}
+
+/* ══════════════════════════ 画图 ══════════════════════════ */
+const FONT='"PingFang SC","Microsoft YaHei","SimHei",sans-serif';
+// 配色：默认与《组织架构生成器》的人员架构图同一套色调——
+//   高层沿用总经理/副总经理的深红，板块框用中心横条的砖红，执行院长用执行副总的红，
+//   幕僚侧框用虚设单元的灰蓝，中心按板块轮流取「各板块用不同颜色」那 10 个深色，末级部门用组长紫
+const MODULE_COLORS=["#1f4e79","#1a6157","#6b4423","#5d4e6d","#55613a",
+                     "#2c5f8a","#7a5c2e","#34495e","#1d7373","#4a5568"];
+const THEMES={
+  color:{chain:["#7d2723","#a13a34","#b04840"],head:"#8f3b36",exec:"#b04840",side:"#5B6C8F",
+         center:MODULE_COLORS,leaf:"#7e649e",fg:"#ffffff",line:"#5a5a5a",title:"#14335c",rx:3},
+  gray:{chain:["#d9d9d9"],head:"#d9d9d9",exec:"#d9d9d9",side:"#d9d9d9",
+        center:["#d9d9d9"],leaf:"#d9d9d9",fg:"#111111",line:"#3a3a3a",title:"#111111",rx:0},
+};
+const LEAF_W=30, LEAF_GAP=8, UNIT_GAP=18, COL_GAP=30, MARGIN=24;
+const LEAF_CAP=8, LEAF_FS=13.5, LEAF_STEP=15.5;      // 末级框按 8 个字定高，更长的缩小字号
+const HEAD_W=104, HEAD_H=42, CENTER_MIN_W=62, CENTER_H=42;
+const SIDE_W=92, SIDE_H=26, EXEC_W=104, EXEC_H=30, CHAIN_W=150, CHAIN_H=34;
+const BUS=14;                                         // 横向母线离下一层框顶的距离
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const textW=(s,fs)=>chars(s).reduce((a,ch)=>a+(ch.codePointAt(0)>0x2E80?fs:fs*0.58),0);
+function wrap(s,fs,width){                            // 中文逐字断行，括号内容尽量留在同一行
+  if(textW(s,fs)<=width) return [s];
+  const m=s.match(/^(.+?)(（.+）)$/);
+  if(m && textW(m[1],fs)<=width && textW(m[2],fs)<=width) return [m[1],m[2]];
+  const lines=[]; let cur="";
+  for(const ch of chars(s)){
+    if(cur && textW(cur+ch,fs)>width){ lines.push(cur); cur=""; }
+    cur+=ch;
+  }
+  if(cur) lines.push(cur);
+  return lines;
+}
+
+function render(M,TITLE,style="color",tint=true){
+  const {TOP,COLS}=M, S=[];
+  let TH=THEMES[style]||THEMES.color;
+  if(!tint) TH={...TH,center:TH.center.slice(0,1)};    // 中心框统一用第一种深色
+  const LINE=TH.line, INK=TH.fg;
+  const rect=(x,y,w,h,fill)=>S.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${TH.rx}" fill="${fill}"/>`);
+  const line=(x1,y1,x2,y2)=>S.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${LINE}" stroke-width="1.3"/>`);
+  const text=(x,y,s,fs,color=INK)=>S.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${fs.toFixed(1)}" font-family='${FONT}' text-anchor="middle" dominant-baseline="central" fill="${color}" font-weight="bold">${esc(s)}</text>`);
+  const boxText=(x,y,w,h,s,fs,fill)=>{
+    let lines=wrap(s,fs,w-10);
+    while(lines.length*fs*1.25>h-4 && fs>9){ fs-=0.5; lines=wrap(s,fs,w-10); }   // 放不下就缩字号
+    rect(x,y,w,h,fill);
+    const y0=y+h/2-(lines.length-1)*fs*1.25/2;
+    lines.forEach((ln,i)=>text(x+w/2,y0+i*fs*1.25,ln,fs));
+  };
+  let LEAF_MAX=0;
+  for(const c of COLS.values()) for(const [u,lv] of c.units) for(const s of (lv.length?lv:[u])) LEAF_MAX=Math.max(LEAF_MAX,chars(s).length);
+  // 末级框按 8 个字定高；超过 14 个字时框加高，保证字号不低于 8
+  const LEAF_H=14+Math.max(LEAF_STEP*LEAF_CAP, LEAF_MAX>14?8.5*LEAF_MAX:0);
+  const leaf=(x,y,s)=>{
+    rect(x,y,LEAF_W,LEAF_H,TH.leaf);
+    const cs=chars(s), n=cs.length;
+    const step=n<=LEAF_CAP?LEAF_STEP:(LEAF_H-14)/n;
+    const fs=n<=LEAF_CAP?LEAF_FS:Math.min(Math.max(LEAF_FS*LEAF_CAP/n,8),step);
+    const y0=y+LEAF_H/2-(n-1)*step/2;
+    cs.forEach((ch,i)=>text(x+LEAF_W/2,y0+i*step,ch,fs));
+  };
+
+  // ── 每列宽度：末级框排开的宽度，和板块框 / 侧框需要的宽度取大 ──
+  for(const c of COLS.values()){
+    c.uw=[...c.units.values()].map(lv=>lv.length?Math.max(lv.length*LEAF_W+(lv.length-1)*LEAF_GAP,CENTER_MIN_W):LEAF_W);
+    c.inner=c.uw.reduce((a,b)=>a+b,0)+UNIT_GAP*Math.max(0,c.uw.length-1);
+    c.w=Math.max(c.inner,HEAD_W,c.execs.length?EXEC_W:0,c.sides.length?2*(SIDE_W+16):0);
+  }
+  // ── 竖向位置 ──
+  const Y_TITLE=34; let y=62; const chainY=[];
+  TOP.forEach((b,i)=>{
+    chainY.push(y); y+=CHAIN_H;
+    y+=b.side.length?16+b.side.length*(SIDE_H+12):(i<TOP.length-1?22:0);
+  });
+  const Y_BAR=TOP.length?y+26:66, Y_HEAD=Y_BAR+22;
+  let maxBottom=Y_HEAD+HEAD_H;
+  for(const c of COLS.values()){
+    let cy=Y_HEAD+HEAD_H;
+    c.execY=c.execs.map(()=>{cy+=12; const v=cy; cy+=EXEC_H; return v;});
+    c.sideY=c.sides.map(()=>{cy+=12; const v=cy; cy+=SIDE_H; return v;});
+    maxBottom=Math.max(maxBottom,cy);                  // 框的底边：决定下面中心那一排的高度
+    // 没有下级单元的板块，竖线止于最后一个侧框的连接点，不留一截线头
+    c.trunkEnd=(c.sideY.length&&!c.units.size)?c.sideY[c.sideY.length-1]+SIDE_H/2:cy;
+  }
+  const Y_CENTER=maxBottom+18+BUS, Y_LEAF=Y_CENTER+CENTER_H+18+BUS;
+  const hasLeaf=[...COLS.values()].some(c=>c.units.size);
+  const H=(hasLeaf?Y_LEAF+LEAF_H:Y_CENTER)+MARGIN;
+  const colsW=[...COLS.values()].reduce((a,c)=>a+c.w,0)+COL_GAP*Math.max(0,COLS.size-1);
+  const W=Math.max(colsW+2*MARGIN,CHAIN_W+2*(SIDE_W+40)+2*MARGIN,textW(TITLE,22)+2*MARGIN);
+  const CX=W/2;
+
+  text(CX,Y_TITLE,TITLE,22,TH.title);
+  TOP.forEach((b,i)=>{                                 // 公司高层串成一列，幕僚挂右边
+    const y0=chainY[i];
+    boxText(CX-CHAIN_W/2,y0,CHAIN_W,CHAIN_H,b.label,15,TH.chain[Math.min(i,TH.chain.length-1)]);
+    line(CX,y0+CHAIN_H,CX,i+1<TOP.length?chainY[i+1]:Y_BAR);
+    b.side.forEach((s,k)=>{
+      const sy=y0+CHAIN_H+16+k*(SIDE_H+12);
+      line(CX,sy+SIDE_H/2,CX+34,sy+SIDE_H/2);
+      boxText(CX+34,sy,SIDE_W+20,SIDE_H,s,12.5,TH.side);
+    });
+  });
+  let x=(W-colsW)/2; const headsX=[];
+  let ci=0;
+  for(const [name,c] of COLS){
+    const tint=TH.center[ci++%TH.center.length];       // 这一板块的中心框颜色
+    const mx=x+c.w/2; headsX.push(mx);
+    line(mx,Y_BAR,mx,Y_HEAD);
+    boxText(mx-HEAD_W/2,Y_HEAD,HEAD_W,HEAD_H,c.label||name,12.5,TH.head);
+    // 竖线先画，后面的执行院长框、侧框压在线上面
+    line(mx,Y_HEAD+HEAD_H,mx,c.units.size?Y_CENTER-BUS:c.trunkEnd);
+    c.execs.forEach((s,k)=>boxText(mx-EXEC_W/2,c.execY[k],EXEC_W,EXEC_H,s,12.5,TH.exec));
+    c.sides.forEach((s,k)=>{
+      const sy=c.sideY[k];
+      line(mx,sy+SIDE_H/2,mx+14,sy+SIDE_H/2);
+      boxText(mx+14,sy,SIDE_W,SIDE_H,s,12,TH.side);
+    });
+    if(c.units.size){
+      const busY=Y_CENTER-BUS; let ux=x+(c.w-c.inner)/2; const mids=[];
+      [...c.units].forEach(([u,lv],k)=>{
+        const uw=c.uw[k], um=ux+uw/2; mids.push(um);
+        if(lv.length){                                 // 中心：框 + 下面一排竖排部门
+          const cw=Math.min(uw,Math.max(CENTER_MIN_W,textW(u,13)/2+16));
+          line(um,busY,um,Y_CENTER);
+          boxText(um-cw/2,Y_CENTER,cw,CENTER_H,u,13,tint);
+          const lb=Y_LEAF-BUS, span=lv.length*LEAF_W+(lv.length-1)*LEAF_GAP, lx=um-span/2;
+          line(um,Y_CENTER+CENTER_H,um,lb);
+          line(lx+LEAF_W/2,lb,lx+span-LEAF_W/2,lb);
+          lv.forEach((lf,j)=>{
+            const px=lx+j*(LEAF_W+LEAF_GAP);
+            line(px+LEAF_W/2,lb,px+LEAF_W/2,Y_LEAF);
+            leaf(px,Y_LEAF,lf);
+          });
+        }else{                                         // 板块直属部门：直接落到末级那一排
+          line(um,busY,um,Y_LEAF);
+          leaf(um-LEAF_W/2,Y_LEAF,u);
+        }
+        ux+=uw+UNIT_GAP;
+      });
+      line(Math.min(...mids,mx),busY,Math.max(...mids,mx),busY);
+    }
+    x+=c.w+COL_GAP;
+  }
+  if(headsX.length) line(Math.min(...headsX,CX),Y_BAR,Math.max(...headsX,CX),Y_BAR);
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W.toFixed(0)}" height="${H.toFixed(0)}" viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}"><rect width="100%" height="100%" fill="#ffffff"/>${S.join("")}</svg>`;
+  return {svg,W:Math.round(W),H:Math.round(H)};
+}
+
+/* ══════════════════════════ 页面 ══════════════════════════ */
+let CUR=null;
+function setBtns(on){ ["bSvg","bPng","bPdf"].forEach(id=>document.getElementById(id).disabled=!on); }
+function run(){
+  const msg=document.getElementById("msg"), box=document.getElementById("chartbox");
+  try{
+    const rows=readRows(document.getElementById("data").value);
+    const M=buildModel(rows,document.getElementById("showNames").checked);
+    const title=document.getElementById("title").value.trim()||`${M.ROOT} 组织架构图`;
+    CUR={...render(M,title,document.getElementById("style").value,document.getElementById("moduleTint").checked),title};
+    box.innerHTML=CUR.svg;
+    const nLeaf=[...M.COLS.values()].reduce((a,c)=>a+[...c.units.values()].reduce((b,lv)=>b+(lv.length||1),0),0);
+    msg.innerHTML=`<div class="ok">已生成：${M.COLS.size} 个板块，${nLeaf} 个末级部门；画布 ${CUR.W}×${CUR.H}px</div>`
+      +(M.WARN.length?`<div class="warn">${M.WARN.map(esc).join("<br>")}</div>`:"");
+    setBtns(true);
+  }catch(e){
+    CUR=null; box.innerHTML=""; setBtns(false);
+    msg.innerHTML=`<div class="err">${esc(e.message||e)}</div>`;
+  }
+}
+function fileName(ext){ return (CUR.title.replace(/[\\/:*?"<>|\s]+/g,"")||"公司架构图")+"."+ext; }
+function save(blob,name){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+function downloadSvg(){ if(CUR) save(new Blob([CUR.svg],{type:"image/svg+xml"}),fileName("svg")); }
+function downloadPng(){
+  if(!CUR) return;
+  // 浏览器画布有上限（单边约 32767px，iPhone 总像素约 1677 万），图太大就自动降低倍率
+  const k=Math.min(3,32000/CUR.W,32000/CUR.H,Math.sqrt(16.7e6/(CUR.W*CUR.H)));
+  if(k<1){ alert("图太大，PNG 放不下；请改用「下载 SVG」或「打印 / 另存 PDF」"); return; }
+  const img=new Image();
+  img.onload=()=>{
+    const cv=document.createElement("canvas"); cv.width=Math.floor(CUR.W*k); cv.height=Math.floor(CUR.H*k);
+    const ctx=cv.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.drawImage(img,0,0,cv.width,cv.height);
+    cv.toBlob(b=>{
+      if(!b){ alert("PNG 生成失败（图太大），请改用「下载 SVG」或「打印 / 另存 PDF」"); return; }
+      save(b,fileName("png"));
+    },"image/png");
+  };
+  img.onerror=()=>alert("PNG 生成失败，请改用「下载 SVG」或「打印 / 另存 PDF」");
+  img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(CUR.svg);
+}
+function printPdf(){                                  // 按图的实际尺寸出一页，打印对话框里选「另存为 PDF」
+  if(!CUR) return;
+  const f=document.createElement("iframe");
+  f.style.cssText="position:fixed;width:0;height:0;border:0;right:0;bottom:0";
+  document.body.appendChild(f);
+  const d=f.contentDocument;
+  d.open();
+  d.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(CUR.title)}</title><style>@page{size:${CUR.W}px ${CUR.H}px;margin:0}html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${CUR.svg}</body></html>`);
+  d.close();
+  const done=()=>setTimeout(()=>f.remove(),500);
+  f.contentWindow.addEventListener("afterprint",done);
+  setTimeout(()=>{ f.contentWindow.focus(); f.contentWindow.print(); setTimeout(()=>f.isConnected&&f.remove(),60000); },200);
+}
+function clearAll(){
+  document.getElementById("data").value=""; document.getElementById("chartbox").innerHTML="";
+  document.getElementById("msg").innerHTML=""; CUR=null; setBtns(false);
+}
+const DEMO=[
+  ["组织1","组织2","组织3","组织4","组织5","姓名","岗位","显示岗位","架构角色","不上图","显示顺序"],
+  ["示例公司","","","","","","董事长","董事长","","","10"],
+  ["示例公司","","","","","","董秘办","董秘办","Side","","20"],
+  ["示例公司","","","","","张三","总经理","总经理","","","30"],
+  ["示例公司","","","","","","总经办","总经办","Side","","40"],
+  ["示例公司","副总经理（营销 李四）","营销办","","","","营销办","","Side","","50"],
+  ["示例公司","副总经理（营销 李四）","市场部","","","","","","","","60"],
+  ["示例公司","副总经理（营销 李四）","国内营销中心","国内销售部","","","","","","","70"],
+  ["示例公司","副总经理（营销 李四）","国内营销中心","重点客户部","","","","","","","80"],
+  ["示例公司","副总经理（营销 李四）","国际贸易中心","国际贸易部","","","","","","","90"],
+  ["示例公司","副总经理（研发 王五）","","","","赵六","执行院长","执行院长","","","100"],
+  ["示例公司","副总经理（研发 王五）","研发办","","","","研发办","","Side","","110"],
+  ["示例公司","副总经理（研发 王五）","菌种开发中心","菌种部","","","","","","","120"],
+  ["示例公司","副总经理（研发 王五）","菌种开发中心","功能开发部","","","","","","","130"],
+  ["示例公司","副总经理（研发 王五）","应用技术中心","产品开发部","","","","","","","140"],
+  ["示例公司","副总经理（研发 王五）","应用技术中心","医学法规部","","","","","","","150"],
+  ["示例公司","信息化中心","信息化部","","","","","","","","160"],
+  ["示例公司","副总经理（财务）","财务部","","","","","","","","170"],
+  ["示例公司","副总经理（财务）","投融资部","","","","","","","","180"]
+];
+function loadDemo(){
+  document.getElementById("data").value=DEMO.map(r=>r.join("\t")).join("\n");
+  document.getElementById("title").value="";
+  run();
+}
+</script>
+<script>
+// 网站上跳 index.html / company.html；在本机双击打开工具包文件时改跳同目录下的本地文件
+// 只有当前页面本身就是工具包里的文件名时才改（从网站仓库里直接打开 index.html 时保持原链接）
+const HERE=decodeURIComponent(location.pathname.split("/").pop());
+if(location.protocol==="file:" && !["index.html","company.html"].includes(HERE))
+  document.querySelectorAll("a[data-local]").forEach(a=>a.href=a.dataset.local);
+</script>
+</body>
+</html>
