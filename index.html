@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="orgchart-version" content="20261015-nested-groups">
 <title>组织架构生成器</title>
 <style>
   body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f0f2f5;color:#222}
@@ -470,10 +471,25 @@ function resolveOrgLevels(people){
     paths=paths.map(q=>q.slice(1));
   }
   ORG_TITLE=trimmed.length?trimmed[trimmed.length-1]:"";
-  const D=Math.max(0,...paths.map(q=>q.length));
+  // 有明确部门负责人，且该部门下还细分两级作业组时，保留中间组层。
+  // 只对该部门的后代扣除额外深度，不能让较深的一支挤掉其他部门的分组。
+  const starts=(q,prefix)=>prefix.every((v,j)=>q[j]===v);
+  const nestedRoots=paths.filter((q,i)=>q.length>=2 && DEPT_LV.has(people[i].层级)
+    && paths.some(child=>child.length>=q.length+2&&starts(child,q)))
+    .filter((q,i,all)=>all.findIndex(other=>other.join('\u0001')===q.join('\u0001'))===i);
+  const rootOf=q=>nestedRoots.filter(root=>starts(q,root)).sort((a,b)=>b.length-a.length)[0];
+  const D=Math.max(0,...paths.map(q=>{const root=rootOf(q);return root?Math.min(q.length,root.length+1):q.length;}));
   people.forEach((p,i)=>{
     const q=paths[i];
-    if(D>=3){
+    p._parentGroup="";
+    const root=rootOf(q);
+    if(root && q.length>=root.length){
+      p.中心=root.slice(0,-1).join("·");p.部门=root.at(-1);p.分组="";
+      const tail=q.slice(root.length);
+      const hasChildren=paths.some(child=>child.length>q.length&&starts(child,q));
+      if(tail.length && hasChildren) p._parentGroup=tail.join("·");
+      else if(tail.length){p.分组=tail.at(-1);p._parentGroup=tail.slice(0,-1).join("·");}
+    }else if(D>=3){
       p.中心=q.length>=D-1?q.slice(0,D-2).join("·"):q.join("·");
       p.部门=q.length>=D-1?q[D-2]:"";
       p.分组=q.length>=D?q[D-1]:"";
@@ -698,7 +714,10 @@ function parseRaw(){
   window._orgNote=""; resolveOrgLevels(kept);
   // 图上跨组拖动的结果：只改显示用的「部门/分组」，原始 Excel 一个字都不动
   kept.forEach(p=>{ const mv=PERSON_MOVE[p.姓名];
-    if(mv){ p.部门=mv.d; p.分组=mv.g; } });
+    if(mv){
+      const target=kept.find(q=>q!==p&&q.部门===mv.d&&q.分组===mv.g);
+      p.部门=mv.d;p.分组=mv.g;p._parentGroup=target?target._parentGroup||"":"";
+    } });
   return kept;
 }
 
@@ -831,8 +850,8 @@ function aggregate(people){
   const MGMT_LEVEL=MGMT_LV;
   depts.forEach(D=>{
     if(D.mgmt.length<2) return;
-    let keep=D.mgmt.filter(p=>MGMT_LEVEL.has(p.层级));
-    let rest=D.mgmt.filter(p=>!MGMT_LEVEL.has(p.层级));
+    let keep=D.mgmt.filter(p=>p._parentGroup||MGMT_LEVEL.has(p.层级));
+    let rest=D.mgmt.filter(p=>!p._parentGroup&&!MGMT_LEVEL.has(p.层级));
     // 组织层级深浅不一时（这一支没往下再分组），整队人都落到部门管理层那一行，
     // 而管理层横向排——三人以上就排成长长一条。此时留职级最高的一位当部门头，
     // 其余人竖排成一组，版式和别的部门一致。
@@ -851,6 +870,22 @@ function aggregate(people){
     FIX.push(noGroups
       ? `${rest.map(p=>p.姓名).join("、")}：<b>${D.name}</b> 这一支没有再往下分组，已把他们竖排成「${gn}」一组，避免横排成一长条`
       : `${rest.map(p=>p.姓名).join("、")}：分组填的是部门名「${D.name}」但并非管理层级，已归入 <b>${D.name}</b> 的「部门直属」组`);
+  });
+  depts.forEach(D=>{
+    const names=[...new Set([...D.mgmt,...D.groups.flatMap(G=>G.members)].map(p=>p._parentGroup).filter(Boolean))];
+    D.parentGroups=names.map(name=>({name,heads:D.mgmt.filter(p=>p._parentGroup===name),ext:null}));
+    D.groups.forEach(G=>{
+      const parents=[...new Set(G.members.map(p=>p._parentGroup||""))];
+      G.parent=parents.length===1?parents[0]:"";
+    });
+  });
+  const parentBindings=new Map();
+  [...TOPS,...Object.values(cenHeads).flat(),...depts.flatMap(D=>D.mgmt)].forEach(m=>{
+    const t=String(m.兼管||"").trim();if(!t)return;
+    const own=depts.find(D=>D.mgmt.includes(m));
+    const local=(own?.parentGroups||[]).filter(P=>P.name===t);
+    const hits=local.length?local:depts.flatMap(D=>D.parentGroups.filter(P=>`${D.name}·${P.name}`===t));
+    if(hits.length===1 && !hits[0].heads.length){hits[0].ext=m;parentBindings.set(m,t);}
   });
   // 兼管：管理层兼任某组负责人（该组不再重复列这个人）——
   // 必须在角色人员被撤出之前绑定，否则兼管的组会丢掉负责人
@@ -881,7 +916,7 @@ function aggregate(people){
     const grpNames=new Set(depts.flatMap(D=>Object.keys(D.gmap)));
     [...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)].forEach(m=>{
       const t=String(m.兼管||"").trim();
-      if(!t||grpNames.has(t)||cenTargets(t).length||depts.filter(D=>D.name===t).length!==1) return;
+      if(!t||parentBindings.has(m)||grpNames.has(t)||cenTargets(t).length||depts.filter(D=>D.name===t).length!==1) return;
       window._deptExt[t]=m;
       FIX.push(`${m.姓名}：兼管「${t}」，已标在该部门负责人的位置（本岗和编制不变）`);
     });
@@ -891,7 +926,7 @@ function aggregate(people){
     depts.forEach(D=>Object.keys(D.gmap).forEach(gn=>(all[gn]=all[gn]||[]).push(D)));
     const owners=[...TOPS, ...Object.values(cenHeads).flat(), ...depts.flatMap(D=>D.mgmt)];
     [...new Set(owners)].forEach(m=>{
-      if(m.兼管&&cenTargets(m.兼管).length) return;
+      if(parentBindings.has(m)||(m.兼管&&cenTargets(m.兼管).length)) return;
       if(!m.兼管) return;
       const own=depts.find(D=>D.mgmt.includes(m));
       if(own?.gmap[m.兼管]){ own.gmap[m.兼管].ext=m; return; }
@@ -927,6 +962,7 @@ function aggregate(people){
   {
     const known=new Set();
     depts.forEach(D=>{ if(D.cen) known.add(D.cen); known.add(D.name);
+                       D.parentGroups.forEach(P=>known.add(P.name));
                        Object.keys(D.gmap).forEach(g=>known.add(g)); });
     people.forEach(p=>{
       const t=String(p.兼管||"").trim();
@@ -1010,6 +1046,11 @@ function aggregate(people){
     }
   }
   // 同一中心的部门必须相邻（中心横条才连得成一段）；块的先后取块内最靠前的部门，直属部门各自成块
+  depts.forEach(D=>{
+    const order=[...new Set(D.groups.map(G=>G.parent||""))];
+    D.groups.sort((a,b)=>order.indexOf(a.parent||"")-order.indexOf(b.parent||""));
+    D.parentGroups.sort((a,b)=>order.indexOf(a.name)-order.indexOf(b.name));
+  });
   {
     const blockOf=D=>D.cen||("\u0000"+D.name);
     const pos={}; depts.forEach((D,i)=>{const b=blockOf(D); if(!(b in pos)) pos[b]=i;});
@@ -1433,7 +1474,8 @@ function buildSVG(model){
     (FRAME_STAFF_BY_CEN[c]=FRAME_STAFF_BY_CEN[c]||[]).push(S);
   });
   const VIRT_DETAIL=!!document.getElementById('virtDetail')?.checked;
-  const colsOf=D=>Math.max(1,D.groups.length,D.mgmt.length);
+  const deptManagers=D=>D.mgmt.filter(p=>!p._parentGroup);
+  const colsOf=D=>Math.max(1,D.groups.length,deptManagers(D).length);
   const NG=depts.reduce((s,D)=>s+colsOf(D),0)||1;
   const edges=new Set();let acc=-1;
   depts.slice(0,-1).forEach(D=>{acc+=colsOf(D);edges.add(acc);});
@@ -1500,7 +1542,7 @@ function buildSVG(model){
   const HAS_CEN = Object.keys(cenHeads||{}).length>0 || CEN_LIST.length>1
                || (CEN_LIST.length===1 && depts.some(D=>!D.cen))
                || CEN_LIST.some(c=>(window._cenExt||{})[c]);  // 这一层由上级兼管 → 保留横条，别把兼管信息弄丢
-  const HAS_MGMT=!FRAME&&depts.some(D=>D.mgmt.length>0);   // 骨架图不画管理层   // 没有部门管理层就不留这一行
+  const HAS_MGMT=!FRAME&&depts.some(D=>deptManagers(D).length>0);
   const CTR_TAG = TOPS.some(t=>sideTag(t));
   // 顶层区按职级分行：同一档并排，不同档上下叠（总经理 / 副总经理 / 中心总监… 各占一行）
   const TOP_ROWS=[];
@@ -1541,7 +1583,7 @@ function buildSVG(model){
      中心总监和部门总监挤在一排会让人误以为是平级，这里按职级拆开。
      按职级归桶，不能只合并相邻的——岗位排序会把同一档的人隔开，那样会多拆出一行。*/
   const mgrRows=D=>{const bk={};
-    D.mgmt.forEach(m=>{const r=LV_RANK[m.层级]??999;(bk[r]=bk[r]||[]).push(m);});
+    deptManagers(D).forEach(m=>{const r=LV_RANK[m.层级]??999;(bk[r]=bk[r]||[]).push(m);});
     return Object.keys(bk).map(Number).sort((a,b)=>a-b).map(r=>bk[r]);};
   const H_MGR1=70+EX, GAP_MGR=18;
   const MGR_ROWS=HAS_MGMT?Math.max(1,...depts.map(D=>mgrRows(D).length||1)):0;
@@ -1583,7 +1625,9 @@ function buildSVG(model){
   let _lgx=ML+36, LEG_ROWS=1;
   for(const lb of _legLabels){ const w=19+wid(lb,10.4)+22;
     if(_lgx+w>PAGE_W-ML && _lgx>ML+36){ LEG_ROWS++; _lgx=ML+36; } _lgx+=w; }
-  const Y_LEG=Y_MEM+MAXM*(H_MEM+GAP_M)+28;
+  const H_PARENTBAR=30, H_PARENTBOX=FRAME?0:H_MGR1;
+  const PARENT_BAND=depts.some(D=>D.parentGroups?.length)?H_PARENTBAR+(FRAME?0:8+H_PARENTBOX)+28:0;
+  const Y_LEG=Y_MEM+PARENT_BAND+MAXM*(H_MEM+GAP_M)+28;
   const PAGE_H=Math.round(Y_LEG+(LEG_ROWS-1)*LEG_ROW_H+26+Math.max(NOTES.length,1)*16+10);
 
   const S=[];
@@ -1833,7 +1877,7 @@ function buildSVG(model){
         line(Math.min(ccx,cxx),from+11,Math.max(ccx,cxx),from+11);
         line(cxx,from+11,cxx,Y_DEPT); }
     }else if(center) line(cxx,Y_TFAN,cxx,Y_DEPT);            // 直属部门：从分叉横线下来
-    const k=FRAME?0:D.mgmt.length;
+    const k=FRAME?0:deptManagers(D).length;
     const ext=(window._deptExt||{})[D.name];
     // 本部门没有负责人、但同排别的部门有负责人框 → 在负责人位置补一个虚线框写兼管人；
     // 否则把「×× 兼管」写在部门横条上
@@ -1851,7 +1895,7 @@ function buildSVG(model){
       const rowsM=mgrRows(D);
       mbot=Y_MGR+(rowsM.length-1)*(H_MGR1+GAP_MGR)+H_MGR1;
       line(cxx,Y_DEPT+H_DEPT,cxx,Y_MGR-8);
-      const _dm=deputyPool(D.mgmt,DEPUTY_STYLE);
+      const _dm=deputyPool(deptManagers(D),DEPUTY_STYLE);
       rowsM.forEach((mrow,ri)=>{
         const n=mrow.length, my=Y_MGR+ri*(H_MGR1+GAP_MGR);
         const bw=Math.min(300,((x1-x0)-(n-1)*10)/n),tot=bw*n+10*(n-1),sx=x0+((x1-x0)-tot)/2;
@@ -1874,14 +1918,52 @@ function buildSVG(model){
     }
     // 本部门没有管理层时，组和成员整体上移，不留空行
     // 上移时仍要给连线支架留出净空（支架画在 GY-14），否则会压进部门横条
-    const GY = (HAS_MGMT && !(k||vac)) ? Math.max(Y_MGR, Y_DEPT+H_DEPT+20) : Y_GRP;
-    const MY = GY + H_GRP + 8;
+    const PGY = (HAS_MGMT && !(k||vac)) ? Math.max(Y_MGR, Y_DEPT+H_DEPT+20) : Y_GRP;
+    const nested=!!D.parentGroups?.length;
+    const GY=PGY+(nested?PARENT_BAND:0), MY=GY+H_GRP+8;
     if(!D.groups.length) return;                      // 没有下级分组就不往下画线，免得悬空
-    line(cxx, (k||vac)?mbot:(Y_DEPT+H_DEPT), cxx, GY-14);
     // 分组数少于本部门列数时（管理层撑宽了部门），把这些组在部门跨度内居中
     const gpad=(colsOf(D)-D.groups.length)*(COLW+COL_GAP)/2;
     const gxs=D.groups.map((_,i)=>cols[COL_BASE[di]+i]+gpad+COLW/2);
-    line(Math.min(...gxs),GY-14,Math.max(...gxs),GY-14);
+    if(nested){
+      const parentXs=[];
+      D.parentGroups.forEach(P=>{
+        const indices=D.groups.map((G,i)=>G.parent===P.name?i:-1).filter(i=>i>=0);
+        if(!indices.length)return;
+        const a=gxs[indices[0]]-COLW/2,b=gxs[indices.at(-1)]+COLW/2,pcx=(a+b)/2;
+        parentXs.push(pcx);
+        const ownCount=P.heads.length+indices.reduce((s,i)=>s+D.groups[i].members.length,0);
+        S.push(`<g data-parent-group="${esc(P.name)}">`);
+        rect(a,PGY,b-a,H_PARENTBAR,deptColor(D.name));
+        text(pcx,PGY+20,P.name+cntSuf(ownCount),14,"#fff","bold");
+        let bottom=PGY+H_PARENTBAR;
+        if(!FRAME){
+          const by=bottom+8,bw=Math.min(300,b-a),bx=pcx-bw/2;
+          line(pcx,bottom,pcx,by);
+          if(P.heads.length){
+            const m=P.heads[0];
+            S.push(`<g data-parent-head="1" data-name="${esc(m.姓名)}">`);
+            box(bx,by,bw,H_PARENTBOX,m.层级,prow(m),sideTag(m),null,m.状态,false,roleOf(m));
+            S.push('</g>');
+          }else{
+            const rows=[[P.ext?`负责人：${P.ext.姓名}（兼任）`:"负责人暂缺",12,"bold"]];
+            box(bx,by,bw,H_PARENTBOX,"主管",rows);
+          }
+          bottom=by+H_PARENTBOX;
+        }
+        line(pcx,bottom,pcx,GY-14);
+        line(gxs[indices[0]],GY-14,gxs[indices.at(-1)],GY-14);
+        S.push('</g>');
+      });
+      line(cxx,(k||vac)?mbot:Y_DEPT+H_DEPT,cxx,PGY-14);
+      if(parentXs.length){
+        line(Math.min(...parentXs),PGY-14,Math.max(...parentXs),PGY-14);
+        parentXs.forEach(cx=>line(cx,PGY-14,cx,PGY));
+      }
+    }else{
+      line(cxx,(k||vac)?mbot:Y_DEPT+H_DEPT,cxx,GY-14);
+      line(Math.min(...gxs),GY-14,Math.max(...gxs),GY-14);
+    }
     D.groups.forEach((G,i)=>{
       const gx=cols[COL_BASE[di]+i]+gpad,gcx=gx+COLW/2;
       line(gcx,GY-14,gcx,GY);
@@ -1989,7 +2071,9 @@ function buildSVG(model){
     const X2=X1+wd+76;
     const gLabel=G=>G.name+(G.ext?`（${G.ext.姓名} 兼）`:"");
     const wg=Math.max(80,...depts.flatMap(D=>D.groups.map(G=>wid(gLabel(G),13.5)+(SHOW_COUNT?9+wid(`${G.members.length} 人`,11):0))));
-    PAGE_W=Math.round(X2+wg+MML);
+    const wp=Math.max(100,...depts.flatMap(D=>(D.parentGroups||[]).map(P=>wid(P.name,14)+70)));
+    const X3=X2+wp+76;
+    PAGE_W=Math.round((PARENT_BAND?X3:X2)+wg+MML);
     let yy=92; const dpos=[];
     depts.forEach(D=>{
       const gs=[]; D.groups.forEach(()=>{gs.push(yy); yy+=ROW_G;});
@@ -2006,9 +2090,21 @@ function buildSVG(model){
       const c=HUES[di%HUES.length], [dy,gys]=dpos[di];
       curve(rx+6,rooty+4,X1-8,dy+4,c,1.8);
       const dw=node(X1,dy,D.name,cntOf(D),16,c);
+      const parentPos={};
+      (D.parentGroups||[]).forEach(P=>{
+        const ids=D.groups.map((G,i)=>G.parent===P.name?i:-1).filter(i=>i>=0);
+        if(!ids.length)return;
+        const py=(gys[ids[0]]+gys[ids.at(-1)])/2;
+        const cnt=P.heads.length+ids.reduce((s,i)=>s+D.groups[i].members.length,0);
+        curve(X1+dw+6,dy+4,X2-8,py+3,c,1.2);
+        const pw=node(X2,py,P.name+(P.ext?`（${P.ext.姓名} 兼）`:""),cnt,14,c);
+        parentPos[P.name]=[py,pw];
+      });
       D.groups.forEach((G,gi)=>{
-        curve(X1+dw+6,dy+4,X2-8,gys[gi]+3,c,1.2);
-        node(X2,gys[gi],gLabel(G),G.members.length,13.5,c,"normal");
+        const pos=parentPos[G.parent];
+        if(pos)curve(X2+pos[1]+6,pos[0]+4,X3-8,gys[gi]+3,c,1.2);
+        else curve(X1+dw+6,dy+4,X2-8,gys[gi]+3,c,1.2);
+        node(pos?X3:X2,gys[gi],gLabel(G),G.members.length,13.5,c,"normal");
       });
     });
     NOTES.forEach((t,i)=>text(MML,yy+10+i*18,t,11.5,"#8a9099","normal","start"));
@@ -2022,7 +2118,15 @@ function buildSVG(model){
     const rowsV=[];
     depts.forEach(D=>{
       rowsV.push([1,D.name,D.mgmt.length+D.groups.reduce((a,G)=>a+G.members.length,0)]);
-      D.groups.forEach(G=>rowsV.push([2,G.name+(G.ext?`（${G.ext.姓名} 兼）`:""),G.members.length]));
+      const seen=new Set();
+      D.groups.forEach(G=>{
+        const P=(D.parentGroups||[]).find(P=>P.name===G.parent);
+        if(P&&!seen.has(P.name)){
+          seen.add(P.name);
+          rowsV.push([2,P.name+(P.ext?`（${P.ext.姓名} 兼）`:""),P.heads.length+D.groups.filter(g=>g.parent===P.name).reduce((s,g)=>s+g.members.length,0)]);
+        }
+        rowsV.push([P?3:2,G.name+(G.ext?`（${G.ext.姓名} 兼）`:""),G.members.length]);
+      });
     });
     const Y_TOP=56,H_TOP=72; let yv=Y_TOP+H_TOP+26; const posV=[];
     rowsV.forEach(([lv])=>{const h=lv===1?H_ROW_D:H_ROW_G; posV.push([yv,h]); yv+=h+VGAP;});
@@ -2046,13 +2150,19 @@ function buildSVG(model){
         rect(X_DEPT,yy,VW-X_DEPT-VML,hh,DEPT_BAR,DEPT_BAR,1,5);
         const t=`${nm}${cntSuf(cnt,"　　")}`;
         text(X_DEPT+22,yy+hh/2+6.5,t,fit(t,18,VW-X_DEPT-VML-44),"#ffffff","bold","start");
-        let j=i+1; while(j<rowsV.length&&rowsV[j][0]===2) j++;
-        if(j>i+1){const lp=posV[j-1]; line(TRUNK_G,yy+hh,TRUNK_G,lp[0]+lp[1]/2);}
+        let j=i+1; while(j<rowsV.length&&rowsV[j][0]>=2) j++;
+        const last=rowsV.slice(i+1,j).map((r,k)=>r[0]===2?i+1+k:-1).filter(k=>k>=0).at(-1);
+        if(last!=null){const lp=posV[last];line(TRUNK_G,yy+hh,TRUNK_G,lp[0]+lp[1]/2);}
       }else{
-        line(TRUNK_G,yy+hh/2,X_GRP,yy+hh/2);
-        rect(X_GRP,yy,VW-X_GRP-VML,hh,LEVELS["组长"][1],"#404040",1,4);
+        const xx=X_GRP+(lv-2)*70;
+        line(xx-26,yy+hh/2,xx,yy+hh/2);
+        rect(xx,yy,VW-xx-VML,hh,LEVELS["组长"][1],"#404040",1,4);
+        if(lv===2){
+          let j=i+1;while(j<rowsV.length&&rowsV[j][0]===3)j++;
+          if(j>i+1){const lp=posV[j-1];line(xx+44,yy+hh,xx+44,lp[0]+lp[1]/2);}
+        }
         const t=`${nm}${cntTail(cnt,"　　")}`;
-        text(X_GRP+20,yy+hh/2+5.5,t,fit(t,15.5,VW-X_GRP-VML-40),LEVELS["组长"][2],"bold","start");
+        text(xx+20,yy+hh/2+5.5,t,fit(t,15.5,VW-xx-VML-40),LEVELS["组长"][2],"bold","start");
       }
     });
     NOTES.forEach((t,i)=>text(VML,yv+14+i*18,t,11.5,"#444","normal","start"));
@@ -2338,10 +2448,14 @@ function dlDOC(){
         if(D.cen&&!cenDone.has(D.cen)){cenDone.add(D.cen);
           const hs=(m.cenHeads||{})[D.cen]||[];
           if(hs.length){sect(`${D.cen} ｜ 中心管理（${hs.length} 人）`);hs.forEach(person);}}
-        if(D.mgmt.length){sect(`${D.name} ｜ 部门管理（${D.mgmt.length} 人）`);D.mgmt.forEach(person);}
+        const managers=D.mgmt.filter(p=>!p._parentGroup);
+        if(managers.length){sect(`${D.name} ｜ 部门管理（${managers.length} 人）`);managers.forEach(person);}
+        (D.parentGroups||[]).forEach(P=>{
+          if(P.heads.length){sect(`${D.name} ｜ ${P.name}管理（${P.heads.length} 人）`);P.heads.forEach(person);}
+        });
         D.groups.forEach(G=>{
           if(!G.members.length && (!G.ext || G.keep)) return;   // 被拖空的组只是图上的落点，不进人员资料表
-          sect(`${D.name} ｜ ${G.name}（${G.members.length} 人${G.ext?`，负责人由 ${maskText(G.ext.姓名,NAMES)} 兼任`:""}）`);
+          sect(`${D.name} ｜ ${G.parent?G.parent+' ｜ ':''}${G.name}（${G.members.length} 人${G.ext?`，负责人由 ${maskText(G.ext.姓名,NAMES)} 兼任`:""}）`);
           G.members.forEach(person);
         });
       });
