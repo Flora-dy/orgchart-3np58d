@@ -1827,7 +1827,9 @@ function buildSVG(model){
       // 暂管信息放进框里，横条上就不重复写，也不增加人员编制。
       const peerHasHead=!FRAME&&order.some(o=>o!==c&&(cenHeads[o]||[]).length);
       const ext=(window._cenExt||{})[c];
-      const needVacant=!FRAME&&!(cenHeads[c]||[]).length&&(peerHasHead||!!ext);
+      // 已明确知道由上级兼管时，直接在中心带上写明兼管人，不再画一个空的“负责人暂缺”框。
+      // 只有真正没有负责人且没有兼管人时，才保留空缺占位框。
+      const needVacant=!FRAME&&!(cenHeads[c]||[]).length&&peerHasHead&&!ext;
       const cx0_=x0, cx1_=x1;
       let ct=`${c}${cntSuf(n)}`;
       if(ext&&!needVacant) ct+=`　·　${maskText(ext.姓名,NAMES)} 兼管`;

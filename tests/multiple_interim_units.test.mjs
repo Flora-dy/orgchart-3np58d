@@ -26,13 +26,13 @@ for(const separator of ['、','，',',','；',';']){
  const r=render(rows);
  assert.equal(r.centers['中心甲']?.姓名,'张三','first explicitly listed center must retain its interim manager');
  assert.equal(r.centers['中心乙']?.姓名,'张三','second explicitly listed center must retain its interim manager');
- assert.equal((r.svg.match(/现由 张三 暂管/g)||[]).length,2,'both center leader positions must display the manager');
+ assert.equal((r.svg.match(/张三 兼管/g)||[]).length,2,'both center bars must display the manager');
  assert.equal(r.m.people.length,fixture.length,'interim labels must not duplicate personnel or headcount');
  assert.equal(r.m.TOPS[0].姓名,'张三','the primary leadership position must be retained');
  assert(!r.hints.some(h=>h.includes('表里没有叫这个名字')));
 }
 const masked=render(fixture,['maskName']);
-assert.equal((masked.svg.match(/现由 张X 暂管/g)||[]).length,2);
+assert.equal((masked.svg.match(/张X 兼管/g)||[]).length,2);
 assert(!masked.svg.includes('张三'),'masking must also apply to repeated interim labels');
 for(const flags of [['frameOnly']]){
  const r=render(fixture,flags);

@@ -153,13 +153,13 @@ try {
   const value = result.result.value;
   for (const result of [value.shortName, value.fullName]) {
     assert.equal(result.bindings["甲公司·产品开发部"], "张三", "short and canonical unit names must bind the same interim manager");
-    assert(result.text.includes("负责人暂缺"), "an interim-managed unit must retain the vacant leader card without peer heads");
-    assert(result.text.includes("现由 张三 暂管"), "the vacant leader card must show who temporarily manages the unit");
+    assert(result.text.includes("张三 兼管"), "the center bar must show who temporarily manages the unit");
+    assert(!result.text.includes("负责人暂缺"), "an explicitly interim-managed unit must not show an empty vacant card");
     assert(result.topNames.includes("张三"), "temporary management must preserve the person's primary leadership position");
     assert.equal(result.peopleCount, 4, "temporary management must not duplicate personnel records");
     assert(!result.hints.some(hint => hint.includes("表里没有叫这个名字")), "a valid short name must not be reported as nonexistent");
   }
-  assert(value.masked.text.includes("现由 张X 暂管"), "temporary manager labels must respect name masking");
+  assert(value.masked.text.includes("张X 兼管"), "temporary manager labels must respect name masking");
   assert(!value.masked.text.some(text => text.includes("张三")), "masked charts must not leak the interim manager's full name");
   assert(value.frame.text.some(text => text.includes("张三 兼管")), "frame charts must retain the temporary management annotation");
   assert(!value.frame.text.includes("负责人暂缺"), "frame charts must omit personnel placeholder cards");
