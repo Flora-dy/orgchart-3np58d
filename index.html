@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="orgchart-version" content="20261015-nested-groups">
+<meta name="orgchart-version" content="20261015-multi-interim">
 <title>组织架构生成器</title>
 <style>
   body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f0f2f5;color:#222}
@@ -879,14 +879,20 @@ function aggregate(people){
       G.parent=parents.length===1?parents[0]:"";
     });
   });
+  // 一人可兼管多个单元；逐项解析、去重，不能把「甲中心、乙中心」当成一个名称。
+  const interimTargets=p=>[...new Set(String(p.兼管||"").split(/[、，,；;]/).map(t=>t.trim()).filter(Boolean))];
   const parentBindings=new Map();
-  [...TOPS,...Object.values(cenHeads).flat(),...depts.flatMap(D=>D.mgmt)].forEach(m=>{
-    const t=String(m.兼管||"").trim();if(!t)return;
+  const boundParent=(m,t)=>parentBindings.get(m)?.has(t);
+  [...TOPS,...Object.values(cenHeads).flat(),...depts.flatMap(D=>D.mgmt)].forEach(m=>interimTargets(m).forEach(t=>{
     const own=depts.find(D=>D.mgmt.includes(m));
     const local=(own?.parentGroups||[]).filter(P=>P.name===t);
     const hits=local.length?local:depts.flatMap(D=>D.parentGroups.filter(P=>`${D.name}·${P.name}`===t));
-    if(hits.length===1 && !hits[0].heads.length){hits[0].ext=m;parentBindings.set(m,t);}
-  });
+    if(hits.length===1 && !hits[0].heads.length){
+      hits[0].ext=m;
+      if(!parentBindings.has(m))parentBindings.set(m,new Set());
+      parentBindings.get(m).add(t);
+    }
+  }));
   // 兼管：管理层兼任某组负责人（该组不再重复列这个人）——
   // 必须在角色人员被撤出之前绑定，否则兼管的组会丢掉负责人
   // 允许跨部门兼任——PMO 的人常同时带着某个业务组；组名全表唯一时才认，避免认错
@@ -899,45 +905,42 @@ function aggregate(people){
   };
   window._cenExt={};
   {
-    [...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)].forEach(m=>{
-      const t=String(m.兼管||"").trim();
-      const targets=t?cenTargets(t):[];
+    [...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)].forEach(m=>interimTargets(m).forEach(t=>{
+      const targets=cenTargets(t);
       if(targets.length===1&&!(cenHeads[targets[0]]||[]).length){
         const c=targets[0];
         window._cenExt[c]=m;
         FIX.push(`${m.姓名}：兼管「${c}」，已标为该层的暂管负责人（本岗和编制不变）`);
       }
-    });
+    }));
   }
   // 「兼管分组」填的是部门横条那一层的名字：在该部门负责人的位置标「现由 ×× 兼管」，
   // 本岗和编制都不变。表里有同名分组时仍按分组兼任处理，旧表画出来不变
   window._deptExt={};
   {
     const grpNames=new Set(depts.flatMap(D=>Object.keys(D.gmap)));
-    [...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)].forEach(m=>{
-      const t=String(m.兼管||"").trim();
-      if(!t||parentBindings.has(m)||grpNames.has(t)||cenTargets(t).length||depts.filter(D=>D.name===t).length!==1) return;
+    [...TOPS, ...Object.values(cenHeads||{}).flat(), ...depts.flatMap(D=>D.mgmt)].forEach(m=>interimTargets(m).forEach(t=>{
+      if(boundParent(m,t)||grpNames.has(t)||cenTargets(t).length||depts.filter(D=>D.name===t).length!==1) return;
       window._deptExt[t]=m;
       FIX.push(`${m.姓名}：兼管「${t}」，已标在该部门负责人的位置（本岗和编制不变）`);
-    });
+    }));
   }
   {
     const all={};
     depts.forEach(D=>Object.keys(D.gmap).forEach(gn=>(all[gn]=all[gn]||[]).push(D)));
     const owners=[...TOPS, ...Object.values(cenHeads).flat(), ...depts.flatMap(D=>D.mgmt)];
-    [...new Set(owners)].forEach(m=>{
-      if(parentBindings.has(m)||(m.兼管&&cenTargets(m.兼管).length)) return;
-      if(!m.兼管) return;
+    [...new Set(owners)].forEach(m=>interimTargets(m).forEach(t=>{
+      if(boundParent(m,t)||cenTargets(t).length) return;
       const own=depts.find(D=>D.mgmt.includes(m));
-      if(own?.gmap[m.兼管]){ own.gmap[m.兼管].ext=m; return; }
-      const hit=all[m.兼管]||[];
+      if(own?.gmap[t]){ own.gmap[t].ext=m; return; }
+      const hit=all[t]||[];
       if(hit.length===1){
-        hit[0].gmap[m.兼管].ext=m;
-        FIX.push(`${m.姓名}：跨部门兼任「${m.兼管}」（在 ${hit[0].name} 下），已标为该组负责人`);
+        hit[0].gmap[t].ext=m;
+        FIX.push(`${m.姓名}：跨部门兼任「${t}」（在 ${hit[0].name} 下），已标为该组负责人`);
       }else if(hit.length>1){
-        FIX.push(`${m.姓名} 的「兼管分组」填的是「${m.兼管}」，但有 ${hit.length} 个部门都有同名的组，无法判断，已跳过`);
+        FIX.push(`${m.姓名} 的「兼管分组」填的是「${t}」，但有 ${hit.length} 个部门都有同名的组，无法判断，已跳过`);
       }
-    });
+    }));
   }
 
   // 组员（非管理层级）填「兼管分组」：他不接管那个组，只在那个组挂一条「兼岗」旁注，
@@ -945,16 +948,15 @@ function aggregate(people){
   {
     const all={};
     depts.forEach(D=>Object.keys(D.gmap).forEach(gn=>(all[gn]=all[gn]||[]).push(D)));
-    depts.forEach(D=>D.groups.forEach(G=>G.members.slice().forEach(m=>{
-      const t=String(m.兼管||"").trim();
-      if(!t||cenTargets(t).length||t===G.name||MGMT_LV.has(m.层级)) return;
+    depts.forEach(D=>D.groups.forEach(G=>G.members.slice().forEach(m=>interimTargets(m).forEach(t=>{
+      if(cenTargets(t).length||t===G.name||MGMT_LV.has(m.层级)) return;
       const hit=all[t]||[];
       if(hit.length===1){
         const tg=hit[0].gmap[t];
         (tg.兼岗=tg.兼岗||[]).push(m.姓名);
         FIX.push(`${m.姓名}：本岗在「${G.name}」，兼岗「${t}」，已在该组黄标上标注（不占该组编制）`);
       }
-    })));
+    }))));
   }
 
   // 「兼管分组」填了一个表里根本不存在的名字 → 之前是静默丢弃的，填错列的人完全看不出来。
@@ -964,9 +966,7 @@ function aggregate(people){
     depts.forEach(D=>{ if(D.cen) known.add(D.cen); known.add(D.name);
                        D.parentGroups.forEach(P=>known.add(P.name));
                        Object.keys(D.gmap).forEach(g=>known.add(g)); });
-    people.forEach(p=>{
-      const t=String(p.兼管||"").trim();
-      if(!t) return;
+    people.forEach(p=>interimTargets(p).forEach(t=>{
       const targets=cenTargets(t);
       if(targets.length>1){
         FIX.push(`${p.姓名} 的「兼管分组」填的是「${t}」，但有 ${targets.length} 个同名单元，已跳过；请填写完整名称（${targets.join("、")}）`);
@@ -978,7 +978,7 @@ function aggregate(people){
                  `兼管分组只认单元名（中心/部门/分组），已忽略；请新增一列「架构角色」再填「${t}」`);
       else
         FIX.push(`${p.姓名} 的「兼管分组」填的是「${t}」，但表里没有叫这个名字的中心/部门/分组，已忽略`);
-    });
+    }));
   }
 
   // ⑦ 老数据里被当成层级的「二传手 / B岗」，登记到本单元负责人的黄标旁注上
