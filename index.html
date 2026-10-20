@@ -677,7 +677,7 @@ function parseRaw(){
       方向:g(c,"培养方向"), 状态:rawStatus||(level==="培养"&&rawLevel.replace(/[\s　]/g,"")==="管培生"?"管培生":""), 兼管:g(c,"兼管分组"),
       月薪:g(c,"月薪"), 年薪:g(c,"年薪"),
       显示岗位:g(c,"显示岗位"), 架构角色:g(c,"架构角色"), 不上图:g(c,"不上图"),
-      显示顺序:g(c,"显示顺序"), _row:li,
+      显示顺序:g(c,"显示顺序"), _row:li, _lvSet:!!String(rawLevel||"").trim(),
       _extra:Object.fromEntries(EXTRA_COLS.map(h=>[h,g(c,h)])),
     });
   }
@@ -811,7 +811,10 @@ function aggregate(people){
     if(D.groups.length===0 && (cenCount[D.cen]||0)>1){
       D.mgmt.forEach(p=>{
         if(tail) FIX.push(`${p.姓名}（${p.岗位}）：组织列重复填了「${D.name}」，识别为该部的<b>负责人</b>，画在横条下`);
-        else if(!CENTER_LV.has(p.层级)){FIX.push(`${p.姓名}（${p.岗位}）：部门列＝中心名「${D.cen}」，识别为该中心的<b>中心总监</b>`);p.层级="中心总监";}
+        else if(CENTER_LV.has(p.层级)) return;
+        // 「层级」列明确填了的照原样（框色跟着填的层级走），只是画到中心横条下当负责人；留空的才推定为中心总监
+        else if(p._lvSet) FIX.push(`${p.姓名}（${p.岗位}）：部门列＝中心名「${D.cen}」，识别为该中心的<b>负责人</b>，画在横条下（层级保持「${p.层级}」）`);
+        else {FIX.push(`${p.姓名}（${p.岗位}）：部门列＝中心名「${D.cen}」，识别为该中心的<b>中心总监</b>`);p.层级="中心总监";}
       });
       (cenHeads[D.cen]=cenHeads[D.cen]||[]).push(...D.mgmt);
       if(tail && !tailCens.includes(D.cen)) tailCens.unshift(D.cen);
