@@ -682,6 +682,8 @@ function parseRaw(){
     });
   }
   if(!people.length) throw "没有解析到人员数据行";
+  // 姓名写「空缺 / 待招」的是空岗位：图上照样占位（虚线框），但不计人数、不进资料表和统计
+  people.forEach(p=>{p._vac=isVacant(p);});
   const hide=p=>["是","Y","y","1","√"].includes((p.不上图||"").trim());
   let kept=people.filter(p=>!hide(p));
   window._hiddenCount = people.length - kept.length;
@@ -1294,7 +1296,7 @@ function renderCenterFilter(people){
     chips.push(`<label class="chk"><input type="radio" name="centerPick" data-center="" ${current===""?"checked":""} onchange="centerChanged()"> <b>全部中心</b>（作为一个层级一起画）</label>`);
   }
   centers.forEach(center=>{
-    const n=people.filter(p=>p.中心===center).length, safe=safeHTML(center);
+    const n=headN(people.filter(p=>p.中心===center)), safe=safeHTML(center);
     chips.push(`<label class="chk"><input type="radio" name="centerPick" data-center="${safe}" ${center===current?"checked":""} onchange="centerChanged()"> ${safe} <b>${n}</b></label>`);
   });
   box.innerHTML=chips.join("");
@@ -1318,7 +1320,7 @@ function renderDeptFilter(people,preserve=true){
   box.innerHTML =
     ds.map(d=>{
       const on = (d in prev) ? prev[d] : true;
-      const n = scoped.filter(p=>!TOP_LV.has(p.层级)&&(p.部门||"未填部门")===d).length, safe=safeHTML(d);
+      const n = headN(scoped.filter(p=>!TOP_LV.has(p.层级)&&(p.部门||"未填部门")===d)), safe=safeHTML(d);
       const js=d.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
       return `<span class="chkwrap"><label class="chk"><input type="checkbox" data-dept="${safe}" ${on?"checked":""} onchange="run()"> ${safe} <b>${n}</b></label>`+
              `<button class="ord" title="左移" onclick="moveDept('${js}',-1)">←</button>`+
@@ -1351,7 +1353,7 @@ function renderGroupFilter(people){
     GROUP_ORDER[d]=keepOld.concat(gs.filter(g=>!keepOld.includes(g)));
     const chips=GROUP_ORDER[d].map(g=>{
       const k=d+"||"+g, on=(k in prev)?prev[k]:true;
-      const n=scoped.filter(p=>(p.部门||"未填部门")===d&&p.分组===g).length;
+      const n=headN(scoped.filter(p=>(p.部门||"未填部门")===d&&p.分组===g));
       const js=x=>x.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
       return `<span class="chkwrap"><label class="chk"><input type="checkbox" data-dept="${safeHTML(d)}" data-grp="${safeHTML(g)}" ${on?"checked":""} onchange="run()"> ${safeHTML(g)} <b>${n}</b></label>`+
              `<button class="ord" title="左移" onclick="moveGroup('${js(d)}','${js(g)}',-1)">←</button>`+
@@ -1464,11 +1466,11 @@ function buildSVG(model){
   const VERTICAL=FRAME && !MIND && !!document.getElementById('frameVert')?.checked;
   const {center,TOPS,people,cenHeads}=model;
   let depts=model.depts;      // 幕僚部门会从这里摘走，所以用 let
-  const NAMES=[...new Set(people.map(p=>p.姓名))].sort((a,b)=>b.length-a.length);
+  const NAMES=[...new Set(people.filter(p=>!p._vac).map(p=>p.姓名))].sort((a,b)=>b.length-a.length);
   const NOTES=FRAME ? ["本图只展示组织架构与各单元编制人数，不含具体人员。"]
     : document.getElementById('notes').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const TITLE=document.getElementById('title').value||"组织架构图";
-  const TOTAL=people.length-(model.roleOnly||[]).length;   // 角色人员不计入编制
+  const TOTAL=headN(people)-headN(model.roleOnly||[]);   // 角色人员不计入编制
   // 部门占几列：分组数和管理层框数取大者，保证管理层一行排开也有可读宽度
   // 幕僚部门：从常规部门行里摘出来，单独挂在主干线右侧（必须在算列宽之前摘）
   let STAFF=depts.filter(D=>[...D.mgmt,...D.groups.flatMap(G=>G.members)]
@@ -1525,7 +1527,7 @@ function buildSVG(model){
                                    .map(p=>p.姓名))];
   const HAS_PAY=!maskOn()&&people.some(p=>payLine(p));
   const HEAD_UNIFORM=!!document.getElementById('headUniform')?.checked;
-  const deptCount=D=>D.mgmt.length+D.groups.reduce((s,G)=>s+G.members.length,0);
+  const deptCount=D=>headN(D.mgmt)+D.groups.reduce((s,G)=>s+headN(G.members),0);
   const SHOW_DEPTBAR=!document.getElementById('hideDeptBar')?.checked;
   // 板块配色：每个部门一种颜色；关掉就全部回到单一深蓝
   const MODULE_TINT=document.getElementById('moduleTint')?.checked!==false;
@@ -1646,6 +1648,8 @@ function buildSVG(model){
   const line=(a,b,c,d)=>S.push(`<line x1="${a.toFixed(1)}" y1="${b.toFixed(1)}" x2="${c.toFixed(1)}" y2="${d.toFixed(1)}" stroke="#5a5a5a" stroke-width="1.1"/>`);
 
   const prow=p=>{
+    // 空岗位：没有个人信息可写，只写岗位并注明不计人数，免得一串「—」
+    if(p._vac) return [[`${p.姓名}　${p.显示岗位||p.岗位}`,12,"bold"],["（空缺岗位，不计人数）",10.6,"normal"]];
     const role=(p.显示岗位||p.岗位)+((p.状态&&p.状态!=="管培生")?("·"+p.状态):"");
     const nm=(p.状态==="管培生"?"★":"")+p.姓名;
     const xl=(p.在职?"在职":"")+p.学历;
@@ -1686,8 +1690,10 @@ function buildSVG(model){
     if(st==="外包"){fill=OUTSRC_FILL;fg=OUTSRC_FG;}      // 外包不在层级序列里，单独用灰底
     else if(st==="管培生"){fill=TRAINEE_FILL;fg=TRAINEE_FG;}  // 管培生同样单独一色，姓名前另有 ★
     else if(st==="试用"||st==="试用延期"){fill=PROBATION_FILL;fg=PROBATION_FG;}  // 试用期：橙底
+    if(st==="空缺"){fill="#f7f7f5";fg="#6b7480";}                // 空岗位：灰色虚线框，与「负责人暂缺」一致
     if(drag) S.push(`<g class="pbox"${drag.h?' data-head="1"':''}${drag.e?' data-empty="1"':''} data-dept="${esc(drag.d)}" data-grp="${esc(drag.g)}" data-name="${esc(drag.n||"")}">`);
-    rect(x,y,w,h,fill);
+    if(st==="空缺") S.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${fill}" stroke="#9aa3ad" stroke-width="1.4" stroke-dasharray="5 4"/>`);
+    else rect(x,y,w,h,fill);
     const cx=x+w/2,maxw=w-10,lh=14.2;
     const avail=h-(tag?TAG_H+3:0);          // 有 B 岗标签时先扣掉它占的高度
     let y0=y+(avail-(rows.length*lh-3))/2+10.5;
@@ -1718,7 +1724,7 @@ function buildSVG(model){
           first=false;
         }
         box(sx+j*(cw+12),y,cw,H_TROW,t.层级,rows,
-            FRAME?null:sideTag(t),null,FRAME?null:t.状态,!FRAME&&dep.has(t),
+            FRAME?null:sideTag(t),null,FRAME?null:stOf(t),!FRAME&&dep.has(t),
             FRAME?null:roleOf(t));
       });
       const bot=y+H_TROW;
@@ -1780,7 +1786,7 @@ function buildSVG(model){
         ppl.forEach((m,i2)=>{
           const bx=vx+i2*(bw+10);
           line(bx+bw/2, vy+H_STAFFBAR, bx+bw/2, by);
-          box(bx,by,bw,H_STAFFBOX,m.层级,prow(m),sideTag(m),null,m.状态,false,roleOf(m));});
+          box(bx,by,bw,H_STAFFBOX,m.层级,prow(m),sideTag(m),null,stOf(m),false,roleOf(m));});
       }else{
         line(vx+vw/2, vy+H_STAFFBAR, vx+vw/2, by);
         rect(vx, by, vw, 46, "#EEF1F6",VIRT_BAR,1.2,4);
@@ -1805,7 +1811,7 @@ function buildSVG(model){
       line(PAGE_W/2, sy+H_STAFFBAR/2, bx0, sy+H_STAFFBAR/2);
       const sc=deptColor(S.name);
       rect(bx0,sy,blockw,H_STAFFBAR,sc,sc,1,4);
-      const cnt=S.mgmt.length+S.groups.reduce((a,G)=>a+G.members.length,0);
+      const cnt=headN(S.mgmt)+S.groups.reduce((a,G)=>a+headN(G.members),0);
       const t=`${S.name}${cntSuf(cnt)}`;
       text(bx0+blockw/2, sy+18, t, fit(t,13,blockw-16), "#ffffff","bold");
       const dep=deputyPool(ppl,DEPUTY_STYLE);
@@ -1813,7 +1819,7 @@ function buildSVG(model){
         const px=bx0+j*(bw+10);
         line(px+bw/2, sy+H_STAFFBAR, px+bw/2, sy+H_STAFFBAR+6);
         box(px, sy+H_STAFFBAR+6, bw, H_STAFFBOX, m.层级, prow(m),
-            sideTag(m), null, m.状态, dep.has(m), roleOf(m));
+            sideTag(m), null, stOf(m), dep.has(m), roleOf(m));
       });
     });
   }
@@ -1830,7 +1836,7 @@ function buildSVG(model){
       if(center) line(cx,Y_TFAN,cx,Y_CEN);
       rect(x0,Y_CEN,x1-x0,H_CENBAR,"#8f3b36","#8f3b36",1,4);
       const n=idxs.reduce((s,i)=>s+deptCount(depts[i]),0)
-              +((cenHeads[c]||[]).length);
+              +headN(cenHeads[c]||[]);
       // 同级有负责人框，或本层有人暂管时，补一个「负责人暂缺」虚线框。
       // 暂管信息放进框里，横条上就不重复写，也不增加人员编制。
       const peerHasHead=!FRAME&&order.some(o=>o!==c&&(cenHeads[o]||[]).length);
@@ -1868,7 +1874,7 @@ function buildSVG(model){
         const bw=Math.min(320,x1-x0), bx=cx-bw/2, by=Y_CEN+H_CENBAR+6;
         const rows=prow(ext); rows[0]=[`${maskText(ext.姓名,NAMES)} 兼　负责人`,12,"bold"];
         line(cx,Y_CEN+H_CENBAR,cx,by);
-        box(bx,by,bw,H_CENBOX,ext.层级,rows,null,null,ext.状态,false,roleOf(ext));
+        box(bx,by,bw,H_CENBOX,ext.层级,rows,null,null,stOf(ext),false,roleOf(ext));
       }
       const heads=FRAME?[]:(cenHeads[c]||[]);
       if(heads.length){
@@ -1878,7 +1884,7 @@ function buildSVG(model){
         heads.forEach((h,j)=>{const d=_dc.has(h), w2=(d&&NARROW)?bw*0.84:bw;
           const bx=sx+j*(bw+10)+(bw-w2)/2;
           line(bx+w2/2,Y_CEN+H_CENBAR,bx+w2/2,by);
-          box(bx,by,w2,H_CENBOX,h.层级,prow(h),sideTag(h),null,h.状态,d,roleOf(h));});
+          box(bx,by,w2,H_CENBOX,h.层级,prow(h),sideTag(h),null,stOf(h),d,roleOf(h));});
       }
     });
   }
@@ -1924,7 +1930,7 @@ function buildSVG(model){
           const d=_dm.has(m), w2=(d&&NARROW)?bw*0.84:bw;   // 收窄时保持中线对齐
           const bx=sx+j*(bw+10)+(bw-w2)/2;
           line(bx+w2/2,my-8,bx+w2/2,my);
-          box(bx,my,w2,H_MGR1,m.层级,prow(m),sideTag(m),null,m.状态,d,roleOf(m));});
+          box(bx,my,w2,H_MGR1,m.层级,prow(m),sideTag(m),null,stOf(m),d,roleOf(m));});
       });
     }
     if(vac){                                   // 负责人暂缺、由上级兼管：虚线占位框
@@ -1951,7 +1957,7 @@ function buildSVG(model){
         if(!indices.length)return;
         const a=gxs[indices[0]]-COLW/2,b=gxs[indices.at(-1)]+COLW/2,pcx=(a+b)/2;
         parentXs.push(pcx);
-        const ownCount=P.heads.length+indices.reduce((s,i)=>s+D.groups[i].members.length,0);
+        const ownCount=headN(P.heads)+indices.reduce((s,i)=>s+headN(D.groups[i].members),0);
         S.push(`<g data-parent-group="${esc(P.name)}">`);
         rect(a,PGY,b-a,H_PARENTBAR,deptColor(D.name));
         text(pcx,PGY+20,P.name+cntSuf(ownCount),14,"#fff","bold");
@@ -1962,7 +1968,7 @@ function buildSVG(model){
           if(P.heads.length){
             const m=P.heads[0];
             S.push(`<g data-parent-head="1" data-name="${esc(m.姓名)}">`);
-            box(bx,by,bw,H_PARENTBOX,m.层级,prow(m),sideTag(m),null,m.状态,false,roleOf(m));
+            box(bx,by,bw,H_PARENTBOX,m.层级,prow(m),sideTag(m),null,stOf(m),false,roleOf(m));
             S.push('</g>');
           }else{
             const rows=[[P.ext?`负责人：${P.ext.姓名}（兼任）`:"负责人暂缺",12,"bold"]];
@@ -1986,7 +1992,7 @@ function buildSVG(model){
     D.groups.forEach((G,i)=>{
       const gx=cols[COL_BASE[di]+i]+gpad,gcx=gx+COLW/2;
       line(gcx,GY-14,gcx,GY);
-      const title=`${G.name}${cntTail(G.members.length)}`;
+      const title=`${G.name}${cntTail(headN(G.members))}`;
       if(FRAME){            // 骨架图：一个组只画一个框，里面只有组名和人数
         box(gx,GY,COLW,H_GRP,"组长",[[title+(G.ext?`（${G.ext.姓名} 兼）`:""),13,"bold"]]);
         return;
@@ -2003,7 +2009,7 @@ function buildSVG(model){
         const _p=payLine(m); if(HAS_PAY&&_p) _r.push([_p,10.2,"normal"]);
         // 二传手归属本职岗位，不能自动继承到负责人兼管的组。
         box(gx,GY,COLW,H_GRP,m.层级,_r,mergeTag(sideTag(m,false),groupTag(G,NAMES)),
-            {d:D.name,g:G.name,n:m.姓名,h:1,e:(G.keep&&!G.members.length)?1:0},m.状态,false,roleOf(m));
+            {d:D.name,g:G.name,n:m.姓名,h:1,e:(G.keep&&!G.members.length)?1:0},stOf(m),false,roleOf(m));
         mem=G.members;
       }else{
         // 负责人按组独立识别，不能让别组填写的「架构角色=组头」关闭本组的自动识别。
@@ -2017,7 +2023,7 @@ function buildSVG(model){
           // 组名与上方横条同名（这一支没再分组、自动竖排出来的组）时不再重复写组名
           const _head=G.name===D.name?[]:[[title,12.2,"bold"]];
           box(gx,GY,COLW,H_GRP,lvKey,[..._head,...prow(ld)],mergeTag(sideTag(ld),groupTag(G,NAMES)),
-              {d:D.name,g:G.name,n:ld.姓名,h:1},ld.状态,false,roleOf(ld));
+              {d:D.name,g:G.name,n:ld.姓名,h:1},stOf(ld),false,roleOf(ld));
           mem=G.members.filter(m=>m!==ld);
         }else{
           box(gx,GY,COLW,H_GRP,"组长",
@@ -2029,7 +2035,7 @@ function buildSVG(model){
       let prev=GY+H_GRP;
       mem.forEach((m,mi)=>{const my=MY+mi*(H_MEM+GAP_M);
         line(gcx,prev,gcx,my);
-        box(gx,my,COLW,H_MEM,m.层级,prow(m),null,{d:D.name,g:G.name,n:m.姓名},m.状态,false,roleOf(m));
+        box(gx,my,COLW,H_MEM,m.层级,prow(m),null,{d:D.name,g:G.name,n:m.姓名},stOf(m),false,roleOf(m));
         prev=my+H_MEM;});
     });
   });
@@ -2046,6 +2052,7 @@ function buildSVG(model){
   }
   if(!FRAME&&tagLegend()) items.push([(x,y)=>rect(x,y,15,12,BGANG,"#b8a100",0.7,2),tagLegend()]);
   if(SSET.has("外包")) items.push([(x,y)=>rect(x,y,15,12,OUTSRC_FILL),"外包人员"]);
+  if(!FRAME&&people.some(p=>p._vac)) items.push([(x,y)=>S.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="15" height="12" rx="2" fill="#f7f7f5" stroke="#9aa3ad" stroke-width="1.2" stroke-dasharray="3 2"/>`),"空缺岗位（不计人数）"]);
   if(SSET.has("试用")||SSET.has("试用延期")) items.push([(x,y)=>rect(x,y,15,12,PROBATION_FILL),"试用期人员"]);
   if(SSET.has("管培生")) items.push([(x,y)=>{rect(x,y,15,12,TRAINEE_FILL);text(x+7.5,y+10,"★",10.5,"#14413a","bold");},"管培生（姓名前带★）"]);
   if(SSET.has("产假")) items.push([()=>{},"产假人员在岗位后标注"]);
@@ -2082,7 +2089,7 @@ function buildSVG(model){
       S.push(`<line x1="${x.toFixed(1)}" y1="${(y+6).toFixed(1)}" x2="${(x+w).toFixed(1)}" y2="${(y+6).toFixed(1)}" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/>`);
       return w;
     };
-    const cntOf=D=>D.mgmt.length+D.groups.reduce((a,G)=>a+G.members.length,0);
+    const cntOf=D=>headN(D.mgmt)+D.groups.reduce((a,G)=>a+headN(G.members),0);
     const MML=44, ROW_G=40, ROW_D=46, GAPB=26;
     const t0=TOPS[0];
     const root=(t0&&(t0.中心||t0.部门))||TITLE.replace(" 组织架构图","");
@@ -2116,7 +2123,7 @@ function buildSVG(model){
         const ids=D.groups.map((G,i)=>G.parent===P.name?i:-1).filter(i=>i>=0);
         if(!ids.length)return;
         const py=(gys[ids[0]]+gys[ids.at(-1)])/2;
-        const cnt=P.heads.length+ids.reduce((s,i)=>s+D.groups[i].members.length,0);
+        const cnt=headN(P.heads)+ids.reduce((s,i)=>s+headN(D.groups[i].members),0);
         curve(X1+dw+6,dy+4,X2-8,py+3,c,1.2);
         const pw=node(X2,py,P.name+(P.ext?`（${P.ext.姓名} 兼）`:""),cnt,14,c);
         parentPos[P.name]=[py,pw];
@@ -2125,7 +2132,7 @@ function buildSVG(model){
         const pos=parentPos[G.parent];
         if(pos)curve(X2+pos[1]+6,pos[0]+4,X3-8,gys[gi]+3,c,1.2);
         else curve(X1+dw+6,dy+4,X2-8,gys[gi]+3,c,1.2);
-        node(pos?X3:X2,gys[gi],gLabel(G),G.members.length,13.5,c,"normal");
+        node(pos?X3:X2,gys[gi],gLabel(G),headN(G.members),13.5,c,"normal");
       });
     });
     NOTES.forEach((t,i)=>text(MML,yy+10+i*18,t,11.5,"#8a9099","normal","start"));
@@ -2138,15 +2145,15 @@ function buildSVG(model){
     const H_ROW_D=54, H_ROW_G=46, VGAP=10, TRUNK_D=X_DEPT-26, TRUNK_G=X_GRP-26;
     const rowsV=[];
     depts.forEach(D=>{
-      rowsV.push([1,D.name,D.mgmt.length+D.groups.reduce((a,G)=>a+G.members.length,0)]);
+      rowsV.push([1,D.name,headN(D.mgmt)+D.groups.reduce((a,G)=>a+headN(G.members),0)]);
       const seen=new Set();
       D.groups.forEach(G=>{
         const P=(D.parentGroups||[]).find(P=>P.name===G.parent);
         if(P&&!seen.has(P.name)){
           seen.add(P.name);
-          rowsV.push([2,P.name+(P.ext?`（${P.ext.姓名} 兼）`:""),P.heads.length+D.groups.filter(g=>g.parent===P.name).reduce((s,g)=>s+g.members.length,0)]);
+          rowsV.push([2,P.name+(P.ext?`（${P.ext.姓名} 兼）`:""),headN(P.heads)+D.groups.filter(g=>g.parent===P.name).reduce((s,g)=>s+headN(g.members),0)]);
         }
-        rowsV.push([P?3:2,G.name+(G.ext?`（${G.ext.姓名} 兼）`:""),G.members.length]);
+        rowsV.push([P?3:2,G.name+(G.ext?`（${G.ext.姓名} 兼）`:""),headN(G.members)]);
       });
     });
     const Y_TOP=56,H_TOP=72; let yv=Y_TOP+H_TOP+26; const posV=[];
@@ -2426,7 +2433,7 @@ function printPane(){
 function dlDOC(){
   if(need())return;
   const m=lastModel;
-  const NAMES=[...new Set(m.people.map(p=>p.姓名))].sort((a,b)=>b.length-a.length);
+  const NAMES=[...new Set(m.people.filter(p=>!p._vac).map(p=>p.姓名))].sort((a,b)=>b.length-a.length);
   const M=s=>{let t=maskText(s,NAMES);return String(t??"").replace(/&/g,'&amp;').replace(/</g,'&lt;');};
   toPNG(pngBlob=>{
     const fr=new FileReader();
@@ -2442,7 +2449,7 @@ function dlDOC(){
       const NCOL=(HAS_PARTY?13:12)+EXC.length;
       let rows="",idx=0;
       const sect=t=>{rows+=`<tr><td colspan="${NCOL}" style="background:#DCE6F1;font-weight:bold;text-align:left;padding:3px 6px">${M(t)}</td></tr>`;};
-      const person=p=>{idx++;
+      const person=p=>{if(p._vac)return;idx++;
         const fill=p.状态==="管培生"?"#E8F1DE":(p.状态==="试用"||p.状态==="试用延期")?"#FDF3D8":p.状态==="外包"?"#EFEFEF":(idx%2===0?"#F2F6FA":"#FFFFFF");
         // 公司模板固定 12 列，第一学历并入「毕业院校」格：最高学历院校在上、第一学历在下
         let sch=M(p.院校);
@@ -2462,30 +2469,30 @@ function dlDOC(){
           return `<td width="${HW0[j]||70}" style="width:${HW0[j]}pt;background:${fill};text-align:${(HAS_PARTY?[1,6,7,11,12]:[1,5,6,10,11]).includes(j)?'left':'center'};padding:2px 5px">${html}</td>`;
         }).join("")+"</tr>";
       };
-      if(m.center){sect(`${m.center.部门} ｜ 中心管理（1 人）`);person(m.center);}
+      if(m.center&&!m.center._vac){sect(`${m.center.部门} ｜ 中心管理（1 人）`);person(m.center);}
       const cenDone=new Set();
       m.depts.forEach(D=>{
         // 中心负责人插在该中心的第一个部门之前，顺序与架构图一致
         if(D.cen&&!cenDone.has(D.cen)){cenDone.add(D.cen);
           const hs=(m.cenHeads||{})[D.cen]||[];
-          if(hs.length){sect(`${D.cen} ｜ 中心管理（${hs.length} 人）`);hs.forEach(person);}}
+          if(headN(hs)){sect(`${D.cen} ｜ 中心管理（${headN(hs)} 人）`);hs.forEach(person);}}
         const managers=D.mgmt.filter(p=>!p._parentGroup);
-        if(managers.length){sect(`${D.name} ｜ 部门管理（${managers.length} 人）`);managers.forEach(person);}
+        if(headN(managers)){sect(`${D.name} ｜ 部门管理（${headN(managers)} 人）`);managers.forEach(person);}
         (D.parentGroups||[]).forEach(P=>{
-          if(P.heads.length){sect(`${D.name} ｜ ${P.name}管理（${P.heads.length} 人）`);P.heads.forEach(person);}
+          if(headN(P.heads)){sect(`${D.name} ｜ ${P.name}管理（${headN(P.heads)} 人）`);P.heads.forEach(person);}
         });
         D.groups.forEach(G=>{
-          if(!G.members.length && (!G.ext || G.keep)) return;   // 被拖空的组只是图上的落点，不进人员资料表
-          sect(`${D.name} ｜ ${G.parent?G.parent+' ｜ ':''}${G.name}（${G.members.length} 人${G.ext?`，负责人由 ${maskText(G.ext.姓名,NAMES)} 兼任`:""}）`);
+          if(!headN(G.members) && (!G.ext || G.keep)) return;   // 被拖空的组（或只剩空缺岗位）不进人员资料表
+          sect(`${D.name} ｜ ${G.parent?G.parent+' ｜ ':''}${G.name}（${headN(G.members)} 人${G.ext?`，负责人由 ${maskText(G.ext.姓名,NAMES)} 兼任`:""}）`);
           G.members.forEach(person);
         });
       });
-      if((m.roleOnly||[]).length){    // 二传手 / B岗 角色人员：不进架构图，但资料表要有
-        sect(`二传手 / B岗（不占编制，共 ${m.roleOnly.length} 人）`);
+      if(headN(m.roleOnly)){    // 二传手 / B岗 角色人员：不进架构图，但资料表要有
+        sect(`二传手 / B岗（不占编制，共 ${headN(m.roleOnly)} 人）`);
         m.roleOnly.forEach(person);
       }
       Object.entries(m.cenHeads||{}).forEach(([c,hs])=>{   // 名下暂无部门的中心补在最后
-        if(!cenDone.has(c)&&hs.length){sect(`${c} ｜ 中心管理（${hs.length} 人）`);hs.forEach(person);}
+        if(!cenDone.has(c)&&headN(hs)){sect(`${c} ｜ 中心管理（${headN(hs)} 人）`);hs.forEach(person);}
       });
       const HW=HW0;
       const hdr=["序号","岗位","姓名","性别"].concat(HAS_PARTY?["党员"]:[])
@@ -2534,6 +2541,11 @@ function quart(xs){if(!xs.length)return[0,0,0,0,0];const s=[...xs].sort((a,b)=>a
   const q=f=>{const i=f*(n-1),lo=Math.floor(i),hi=Math.min(lo+1,n-1);return s[lo]+(s[hi]-s[lo])*(i-lo);};
   return[s[0],q(.25),q(.5),q(.75),s[n-1]];}
 function bandOf(v){const m=String(v||"").match(/^([TM]\d+)/);return m?m[1]:"未定级";}
+
+// 空岗位：姓名写「空缺」「待招」开头的行，只在图上占位，不算人头
+function isVacant(p){return /^(空缺|待招)/.test(String(p.姓名||"").trim());}
+function headN(a){return (a||[]).filter(p=>!p._vac).length;}
+function stOf(p){return p._vac?"空缺":p.状态;}
 
 function analyze(people){
   const all=people.filter(p=>mMonthly(p)>0);
@@ -2923,7 +2935,7 @@ function showPanD(){
   try{
     const model=parse();
     const title=((document.getElementById('title').value||"").replace("组织架构图","").trim());
-    window._panA=panD(model.people);
+    window._panA=panD(model.people.filter(p=>!p._vac));
     const d=fileDate(), ds=`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6)}`;
     document.getElementById('pandbox').innerHTML=
       panHTML(window._panA,title||"全员",ds)
@@ -2988,7 +3000,7 @@ function showReport(){
     const model=parse();
     const title=((document.getElementById('title').value||"").replace("组织架构图","").trim()
                  +" 人才结构与薪酬分析").trim();
-    const A=analyze(model.people);
+    const A=analyze(model.people.filter(p=>!p._vac));
     document.getElementById('reportbox').innerHTML=
       `<style>${RPT_SCOPED}</style><div class="rpt">${reportHTML(A,title,maskOn())}</div>`;
     showTab('report');
