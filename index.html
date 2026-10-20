@@ -102,7 +102,7 @@
   中心 / 部门 / 分组 / 姓名 / 岗位 / 层级(中心·部门负责人·二传手·组长·骨干·培养) / 性别 / 学历 / 在职学历 / 毕业院校 / 所学专业 / 参加工作时间 / 来公司时间 / 职等职级 / 全日制 / 核心岗位 / B岗人员 / 培养方向 / 状态(管培生·试用·外包·产假) / 兼管分组 / 月薪 / 年薪<br>
   <b>年限自动计算</b>：新模板填写「参加工作时间」「来公司时间」，例如 2001、06、2001、6、2001-06 或 2001年6月。以「文件名／统计日期」为基准，按整月差÷12计算并保留1位小数；留空按当天。只填年份按当年7月估算。旧表的「工龄」「司龄」数字列仍可用。<br>
   岗位从高到低：副总 → 中心总监 → 中心副总监 → 部门总监 → 部门副总监 → 部门经理 → 部门副经理 → 主管 → 组长；层级填 B岗/B 岗会按二传手处理，填管培生会按培养处理。<br>
-  <b>可选列</b>：<b>显示岗位</b>（图上用它替代岗位，正式岗位仍保留在表里）／<b>架构角色</b>（填「组头」指定本组负责人；未指定的组优先识别「层级=组长」，否则按组内现有排序取第一人）／<b>不上图</b>（填「是」的人保留在数据里，但不进图、不进 Word、不计入人数）／<b>显示顺序</b>（数字，控制组和人的先后，优先级最高）。<br>
+  <b>可选列</b>：<b>显示岗位</b>（图上用它替代岗位，正式岗位仍保留在表里）／<b>架构角色</b>（填「组头」指定本组负责人；未指定的组优先识别「层级=组长」，否则按组内现有排序取第一人）／<b>不上图</b>（填「是」的人保留在数据里，但不进图、不进 Word、不计入人数）／<b>显示顺序</b>（数字，控制组和人的先后，优先级最高）／<b>层级编号</b>（填 1～14 的数字，直接指定层级：1 总经理、2 副总经理、3 执行副总、4 中心总监、5 中心副总监、6 部门总监、7 部门副总监、8 部门经理、9 部门副经理、10 主管、11 组长、12 核心骨干、13 基石员工、14 流动培养；填了就以它为准，不再按「层级」「岗位」文字推断）。<br>
   排序优先级：填了「显示顺序」→ 按它；勾选「按表格原顺序」→ 按 Excel 行序；都没有 → 按岗位高低自动排序。</div>
   </details>
   <textarea id="data" placeholder="把 Excel 表格（含表头行）粘贴到这里…"
@@ -554,6 +554,19 @@ const ROLE_INFER=[
   [/副主管|主管/,"主管"],      [/副组长|组长/,"组长"],
   [/副总监/,"部门副总监"],     [/总监/,"部门总监"],
 ];
+// 层级编号：按层级表的顺序编号（1=总经理 … 14=流动培养），填数字就不用猜
+const LV_BY_NO=Object.keys(LEVELS);
+function levelByNo(value, name){
+  const raw=String(value||"").trim();
+  if(!raw) return "";
+  const t=raw.replace(/[０-９]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
+  const n=/^\d+(\.0+)?$/.test(t)?parseInt(t,10):NaN;
+  if(n>=1&&n<=LV_BY_NO.length) return LV_BY_NO[n-1];
+  (window._levelFixes=window._levelFixes||[]).push(
+    `${name||""}｜层级编号「${raw}」不在 1～${LV_BY_NO.length} 之间，已忽略，改按「层级」列识别`);
+  return "";
+}
+
 function normalizeLevel(value, role, name){
   const raw=String(value||"").trim(), compact=raw.replace(/[\s　]/g,"");
   if(LEVELS[compact]) return compact;
@@ -630,7 +643,7 @@ function parseRaw(){
     "姓名","岗位","层级","性别","党员","最高学历","学历","在职学历","统招",
     "最高学历院校","毕业院校","最高学历专业","所学专业",
     "参加工作时间","来公司时间","工龄","司龄","职等职级","月薪","年薪","全日制","核心岗位",
-    "B岗人员","二传手","培养方向","状态","兼管分组","显示岗位","架构角色","不上图","显示顺序"];
+    "B岗人员","二传手","培养方向","状态","兼管分组","显示岗位","架构角色","不上图","显示顺序","层级编号"];
   const EXTRA_COLS=hdr.filter(h=>h&&!KNOWN.includes(h));
   window._extraCols=EXTRA_COLS;
   // 列改名后的兼容：新名字找不到就退回老名字，旧表不用改也能跑
@@ -652,7 +665,11 @@ function parseRaw(){
       if(n==="") throw `第 ${li+1} 行「${dateCol}」无效或晚于统计日期：${v}；请填写年月，例如 2001、6`;
       return n;
     };
-    const rawLevel=g(c,"层级"), level=normalizeLevel(rawLevel, g(c,"岗位"), g(c,"姓名"));
+    // 「层级编号」填了 1～14 的数字就直接对应层级表那一档，不再按层级/岗位文字推断
+    const lvNo=levelByNo(g(c,"层级编号"), g(c,"姓名"));
+    const rawLevel=g(c,"层级"), level=lvNo||normalizeLevel(rawLevel, g(c,"岗位"), g(c,"姓名"));
+    if(lvNo&&rawLevel&&rawLevel.replace(/[\s　]/g,"")!==lvNo) window._levelFixes.push(
+      `${g(c,"姓名")}｜层级编号「${g(c,"层级编号")}」=「${lvNo}」，与层级列「${rawLevel}」不一致，以编号为准`);
     const rawStatus=g(c,"状态");
     people.push({
       中心:g(c,"中心"), 部门:g(c,"部门"), 分组:g(c,"分组"),
@@ -677,7 +694,7 @@ function parseRaw(){
       方向:g(c,"培养方向"), 状态:rawStatus||(level==="培养"&&rawLevel.replace(/[\s　]/g,"")==="管培生"?"管培生":""), 兼管:g(c,"兼管分组"),
       月薪:g(c,"月薪"), 年薪:g(c,"年薪"),
       显示岗位:g(c,"显示岗位"), 架构角色:g(c,"架构角色"), 不上图:g(c,"不上图"),
-      显示顺序:g(c,"显示顺序"), _row:li, _lvSet:!!String(rawLevel||"").trim(),
+      显示顺序:g(c,"显示顺序"), _row:li, _lvSet:!!lvNo||!!String(rawLevel||"").trim(),
       _extra:Object.fromEntries(EXTRA_COLS.map(h=>[h,g(c,h)])),
     });
   }
