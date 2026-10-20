@@ -1835,7 +1835,8 @@ function buildSVG(model){
       // 暂管信息放进框里，横条上就不重复写，也不增加人员编制。
       const peerHasHead=!FRAME&&order.some(o=>o!==c&&(cenHeads[o]||[]).length);
       const ext=(window._cenExt||{})[c];
-      // 已明确知道由上级兼管时，直接在中心带上写明兼管人，不再画一个空的“负责人暂缺”框。
+      // 已明确知道由上级兼管时，在中心带上写明兼管人，不再画一个空的“负责人暂缺”框
+      // （同级有负责人框时，下面另补一个兼管人框占位）。
       // 只有真正没有负责人且没有兼管人时，才保留空缺占位框。
       const needVacant=!FRAME&&!(cenHeads[c]||[]).length&&peerHasHead&&!ext;
       const cx0_=x0, cx1_=x1;
@@ -1860,6 +1861,14 @@ function buildSVG(model){
         S.push(`<rect x="${vx2.toFixed(1)}" y="${vy2.toFixed(1)}" width="${vw2.toFixed(1)}" height="${H_CENBOX.toFixed(1)}" rx="3" fill="#f7f7f5" stroke="#9aa3ad" stroke-width="1.4" stroke-dasharray="5 4"/>`);
         text(vx2+vw2/2, vy2+H_CENBOX/2-(ext?5:-4), "负责人暂缺", 13, "#6b7480","bold");
         if(ext) text(vx2+vw2/2, vy2+H_CENBOX/2+16, `现由 ${maskText(ext.姓名,NAMES)} 暂管`, 11, "#8a93a0");
+      }
+      // 由上级兼管、同级又有负责人框时，在负责人位置补一个兼管人框，免得这一格空着。
+      // 只是展示：不进 cenHeads，不计人数，不可拖动
+      if(!FRAME&&ext&&!(cenHeads[c]||[]).length&&peerHasHead){
+        const bw=Math.min(320,x1-x0), bx=cx-bw/2, by=Y_CEN+H_CENBAR+6;
+        const rows=prow(ext); rows[0]=[`${maskText(ext.姓名,NAMES)} 兼　负责人`,12,"bold"];
+        line(cx,Y_CEN+H_CENBAR,cx,by);
+        box(bx,by,bw,H_CENBOX,ext.层级,rows,null,null,ext.状态,false,roleOf(ext));
       }
       const heads=FRAME?[]:(cenHeads[c]||[]);
       if(heads.length){
