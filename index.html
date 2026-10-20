@@ -2005,7 +2005,9 @@ function buildSVG(model){
         if(ld){
           const lvKey = HEAD_UNIFORM ? "组长" : (LEVELS[ld.层级]?ld.层级:"组长");
           // 外包一律灰底，组头也不例外；组头靠框更高、写着「组名 N人」和 B 岗标签区分
-          box(gx,GY,COLW,H_GRP,lvKey,[[title,12.2,"bold"],...prow(ld)],mergeTag(sideTag(ld),groupTag(G,NAMES)),
+          // 组名与上方横条同名（这一支没再分组、自动竖排出来的组）时不再重复写组名
+          const _head=G.name===D.name?[]:[[title,12.2,"bold"]];
+          box(gx,GY,COLW,H_GRP,lvKey,[..._head,...prow(ld)],mergeTag(sideTag(ld),groupTag(G,NAMES)),
               {d:D.name,g:G.name,n:ld.姓名,h:1},ld.状态,false,roleOf(ld));
           mem=G.members.filter(m=>m!==ld);
         }else{
